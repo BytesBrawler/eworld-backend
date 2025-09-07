@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Configuration Guide</title>
+    <style>
+        :root {
+            --primary-color: #2196f3;
+            --primary-dark: #1976d2;
+            --primary-light: #bbdefb;
+            --accent-color: #ff4081;
+            --text-color: #333;
+            --text-light: #757575;
+            --background: #f5f7fa;
+            --card-bg: #ffffff;
+            --card-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            --success: #4caf50;
+            --warning: #ff9800;
+            --info: #03a9f4;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background);
+            background-image: linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            border-radius: 12px 12px 0 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%23ffffff' fill-opacity='0.1' fill-rule='evenodd'/%3E%3C/svg%3E");
+            opacity: 0.3;
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        main {
+            background-color: var(--card-bg);
+            padding: 40px;
+            border-radius: 0 0 12px 12px;
+            box-shadow: var(--card-shadow);
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            margin-top: 2em;
+            color: var(--primary-dark);
+            font-size: 1.8em;
+            font-weight: 600;
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 25px;
+        }
+
+        h3 {
+            margin-top: 1.5em;
+            color: var(--primary-color);
+            font-size: 1.4em;
+            font-weight: 500;
+            margin-bottom: 15px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: var(--text-color);
+        }
+
+        .section {
+            margin-bottom: 40px;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-left: 5px solid var(--primary-color);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        }
+
+        code {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            background-color: #f3f4f6;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #e53935;
+            border: 1px solid #e0e0e0;
+        }
+
+        pre {
+            background-color: #f8f9fa;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid #e0e0e0;
+            margin: 15px 0;
+            position: relative;
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+            border: none;
+            color: #333;
+            font-size: 14px;
+        }
+
+        pre::before {
+            content: 'JSON';
+            position: absolute;
+            top: 0;
+            right: 10px;
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 0 0 4px 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        table th, table td {
+            border: 1px solid #eceff1;
+            padding: 12px 15px;
+            text-align: left;
+        }
+
+        table th {
+            background-color: var(--primary-light);
+            color: var(--primary-dark);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+
+        table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        table tr:hover {
+            background-color: #f1f5ff;
+        }
+
+        .tip, .warning, .example, .info-block {
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            position: relative;
+            padding-left: 65px;
+        }
+
+        .tip::before, .warning::before, .example::before, .info-block::before {
+            font-family: sans-serif;
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .tip {
+            background-color: #e8f5e9;
+            border-left: 5px solid var(--success);
+        }
+
+        .tip::before {
+            content: '💡';
+        }
+
+        .warning {
+            background-color: #fff3e0;
+            border-left: 5px solid var(--warning);
+        }
+
+        .warning::before {
+            content: '⚠️';
+        }
+
+        .example {
+            background-color: #e3f2fd;
+            border-left: 5px solid var(--info);
+        }
+
+        .example::before {
+            content: '🔍';
+        }
+
+        .info-block {
+            background-color: #e8eaf6;
+            border-left: 5px solid #3f51b5;
+        }
+
+        .info-block::before {
+            content: 'ℹ️';
+        }
+
+        .placeholder-table {
+            margin-top: 20px;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin: 30px 0;
+        }
+
+        .feature-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, transparent 50%, var(--primary-light) 50%);
+            z-index: -1;
+            border-radius: 0 0 0 100%;
+        }
+
+        .feature-card h3 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .feature-icon {
+            background-color: var(--primary-light);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            color: var(--primary-dark);
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        ul, ol {
+            padding-left: 25px;
+            margin-bottom: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .color-block {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            margin-right: 5px;
+            border-radius: 3px;
+            vertical-align: middle;
+        }
+
+        .button {
+            display: inline-block;
+            background: var(--primary-color);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 500;
+            margin: 10px 0;
+            transition: background 0.3s;
+        }
+
+        .button:hover {
+            background: var(--primary-dark);
+        }
+
+        .navigation {
+            margin: 30px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .navigation ul {
+            list-style: none;
+            padding: 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .navigation li {
+            margin: 0;
+        }
+
+        .navigation a {
+            text-decoration: none;
+            color: var(--primary-color);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            transition: background 0.3s;
+        }
+
+        .navigation a:hover {
+            background: var(--primary-light);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            main {
+                padding: 20px;
+            }
+
+            pre {
+                padding: 10px;
+            }
+
+            .grid-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Add styles for the logo and company name */
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .logo-container img {
+            height: 80px;
+            margin-right: 15px;
+        }
+
+        .company-name {
+            font-family: 'Pacifico', cursive;
+            font-size: 2em;
+            color: white; /* Changed color to white */
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <!-- Add logo and company name -->
+            <div class="logo-container">
+                <img src="/public/mtc.jpeg" alt="Company Logo">
+                <div class="company-name">MODERN TECH CREATIONS</div>
+            </div>
+            <div class="header-content">
+                <h1>API Configuration Guide</h1>
+                <p>Learn how to properly set up your API endpoints and use dynamic placeholders</p>
+            </div>
+        </header>
+        
+        <main>
+            <div class="navigation">
+                <ul>
+                    <li><a href="#getting-started">Getting Started</a></li>
+                    <li><a href="#basic-info">Basic Information</a></li>
+                    <li><a href="#request-config">Request Configuration</a></li>
+                    <li><a href="#dynamic-placeholders">Dynamic Placeholders</a></li>
+                    <li><a href="#response-config">Response Configuration</a></li>
+                    <li><a href="#filters">Filters</a></li>
+                    <li><a href="#advanced">Advanced Settings</a></li>
+                    <li><a href="#examples">Examples</a></li>
+                </ul>
+            </div>
+            
+            <div id="getting-started" class="section">
+                <h2>Getting Started</h2>
+                <p>This guide will help you understand how to use the API configuration screen to create or edit APIs. We'll explain how to format your requests, use dynamic placeholders, and set up response rules correctly.</p>
+                
+                <div class="grid-container">
+                    <div class="feature-card">
+                        <h3><div class="feature-icon">1</div> Define Basic Info</h3>
+                        <p>Start by providing a description and selecting the API type appropriate for your needs.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h3><div class="feature-icon">2</div> Configure Request</h3>
+                        <p>Set up the request details including URL, port, headers, and parameters.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h3><div class="feature-icon">3</div> Set Response Rules</h3>
+                        <p>Define how to process the API response with keys and conditional rules.</p>
+                    </div>
+                    
+                    <div class="feature-card">
+                        <h3><div class="feature-icon">4</div> Add Filters</h3>
+                        <p>Configure filters to extract specific values from the API response.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="basic-info" class="section">
+                <h2>Basic Information</h2>
+                <div class="card">
+                    <h3>Description</h3>
+                    <p>Provide a clear, descriptive name for your API that helps identify its purpose. This will help other users understand what this API does.</p>
+                    
+                    <h3>API Type</h3>
+                    <p>Select the appropriate type for your API:</p>
+                    <ul>
+                        <li><strong><span class="color-block" style="background-color: #2196f3;"></span>Regular API</strong>: For general API endpoints used for transactions</li>
+                        <li><strong><span class="color-block" style="background-color: #4caf50;"></span>Balance Check</strong>: Specifically for checking account balances</li>
+                        <li><strong><span class="color-block" style="background-color: #ff9800;"></span>Offer Check</strong>: For retrieving or validating offers</li>
+                        <li><strong><span class="color-block" style="background-color: #e91e63;"></span>Message</strong>: For sending SMS or notifications</li>
+                    </ul>
+                    
+                    <h3>Status</h3>
+                    <p>Set whether this API is active or inactive. Inactive APIs won't be called by the system.</p>
+                </div>
+            </div>
+            
+            <div id="request-config" class="section">
+                <h2>Request Configuration</h2>
+                <div class="info-block">
+                    <h3>Understanding URL Components</h3>
+                    <p><strong>Base URL:</strong> The main domain address of the API service (e.g., <code>https://api.example.com</code>)</p>
+                    <p><strong>Endpoint:</strong> The specific path on the server that handles this particular function (e.g., <code>/v1/checkBalance</code>)</p>
+                    <p><strong>Port:</strong> A specific communication channel used by the server (e.g., <code>8080</code>). Default ports (80 for HTTP, 443 for HTTPS) can be left empty.</p>
+                    <p><strong>Complete URL Example:</strong> <code>https://api.example.com:8080/v1/checkBalance</code></p>
+                </div>
+                
+                <div class="card">
+                    <h3>Request Port</h3>
+                    <p>The port number for the API endpoint (if required). Leave empty if using standard ports (80 for HTTP, 443 for HTTPS).</p>
+                    
+                    <h3>Request URL Endpoint</h3>
+                    <p>The complete URL path to the API endpoint. Include the full URL including the protocol (http:// or https://).</p>
+                    <div class="example">
+                        <strong>Example:</strong> <code>https://api.example.com/v1/checkBalance</code>
+                    </div>
+                    
+                    <h3>Request Type</h3>
+                    <p>Select the HTTP method for this API call:</p>
+                    <ul>
+                        <li><strong>GET</strong>: Retrieve data from the server</li>
+                        <li><strong>POST</strong>: Send data to the server</li>
+                        <li><strong>PUT</strong>: Update existing data on the server</li>
+                        <li><strong>DELETE</strong>: Remove specific data from the server</li>
+                    </ul>
+                    
+                    <h3>Headers</h3>
+                    <p>This field accepts a JSON object containing all request headers. Each header key-value pair should be formatted as a property in the JSON object.</p>
+                    <div class="example">
+                        <strong>Example:</strong>
+                        <pre>{
+  "Content-Type": "application/json",
+  "Authorization": "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==",
+  "X-API-Key": "12345678"
+}</pre>
+                    </div>
+                    
+                    <h3>Query Parameters</h3>
+                    <p>These parameters will be appended to the URL as query string. Format as a JSON object.</p>
+                    <div class="example">
+                        <strong>Example:</strong>
+                        <pre>{
+  "mobile": "[number]",
+  "opcode": "[opcode]",
+  "apikey": "12345678"
+}</pre>
+                    </div>
+                    
+                    <h3>Body Parameters</h3>
+                    <p>These parameters will be included in the request body. Format as a JSON object.</p>
+                    <div class="example">
+                        <strong>Example:</strong>
+                        <pre>{
+  "accountNumber": "[account]",
+  "amount": "[amount]",
+  "transactionType": "recharge"
+}</pre>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="dynamic-placeholders" class="section">
+                <h2>Dynamic Placeholders</h2>
+                <div class="card">
+                    <p>Use placeholders in your header, query parameters, and body to insert dynamic values at runtime. Placeholders are surrounded by square brackets.</p>
+                    
+                    <table class="placeholder-table">
+                        <thead>
+                            <tr>
+                                <th>Placeholder</th>
+                                <th>Description</th>
+                                <th>Example Usage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>[number]</code></td>
+                                <td>Mobile or phone number</td>
+                                <td><code>"mobile": "[number]"</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>[account]</code></td>
+                                <td>Account number</td>
+                                <td><code>"accountNumber": "[account]"</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>[amount]</code></td>
+                                <td>Transaction amount</td>
+                                <td><code>"amount": "[amount]"</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>[opcode]</code></td>
+                                <td>Operator code</td>
+                                <td><code>"operatorCode": "[opcode]"</code></td>
+                            </tr>
+                            <tr>
+                                <td><code>[message]</code></td>
+                                <td>Message text for SMS</td>
+                                <td><code>"text": "[message]"</code></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div class="warning">
+                        <strong>Important:</strong> Ensure placeholder names are spelled correctly and enclosed in square brackets. The system will automatically replace these with actual values at runtime.
+                    </div>
+                </div>
+            </div>
+            
+            <div id="response-config" class="section">
+                <h2>Response Configuration</h2>
+                <div class="card">
+                    <h3>Response Format Type</h3>
+                    <p>Select the expected format of the API response:</p>
+                    <ul>
+                        <li><strong>JSON</strong>: For structured JSON responses</li>
+                        <li><strong>XML</strong>: For XML formatted responses</li>
+                        <li><strong>Text</strong>: For plain text responses</li>
+                    </ul>
+                    
+                    <h3>Text Separator</h3>
+                    <p>Only applicable for text responses. Specify the character that separates values in the response (comma, pipe, etc.).</p>
+                    
+                    <h3>Response Keys</h3>
+                    <p>Define the keys from the API response that you want to extract and use for evaluation in rules.</p>
+                    <div class="tip">
+                        <strong>Tip:</strong> For JSON responses, use dot notation for nested objects (e.g., <code>response.status</code>).
+                    </div>
+                    
+                    <h3>Response Rules</h3>
+                    <p>Set up conditional rules to determine how the system should handle different response scenarios.</p>
+                    
+                    <h4>Creating a Rule:</h4>
+                    <ol>
+                        <li>Define <strong>Condition 1</strong> (required): Select a response key, condition operator, and the value to compare against.</li>
+                        <li>Define <strong>Condition 2</strong> (optional): Add a second condition if needed.</li>
+                        <li>Select an <strong>Action</strong>: What should happen when these conditions are met.</li>
+                        <li>Add a <strong>Forward Message</strong>: The message to send to the user when this rule is triggered.</li>
+                    </ol>
+                    
+                    <div class="example">
+                        <strong>Example Rule:</strong>
+                        <ul>
+                            <li>Condition 1: If <code>status</code> equals <code>SUCCESS</code></li>
+                            <li>Condition 2: If <code>balance</code> greater than <code>0</code></li>
+                            <li>Action: <code>SUCCESS</code></li>
+                            <li>Forward Message: <code>Transaction successful. Current balance: {balance}</code></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="filters" class="section">
+                <h2>Filters</h2>
+                <div class="card">
+                    <p>Filters allow you to extract specific values from the API response. Use JSONPath or XPath expressions depending on your response format.</p>
+                    
+                    <h3>Available Filters</h3>
+                    <div class="grid-container">
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">RF</div> Response Filter</h3>
+                            <p>Extracts the path to navigate inside the response structure to find specific values.</p>
+                            <p><em>Example:</em> <code>response.data.resultCode</code></p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">CF</div> Customer Filter</h3>
+                            <p>Extracts customer information from the response.</p>
+                            <p><em>Example:</em> <code>response.data.customerInfo</code></p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">AF</div> Amount Filter</h3>
+                            <p>Extracts transaction amount values from the response.</p>
+                            <p><em>Example:</em> <code>response.data.transactionAmount</code></p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">BF</div> Balance Filter</h3>
+                            <p>Extracts account balance values from the response.</p>
+                            <p><em>Example:</em> <code>response.data.accountBalance</code></p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">TF</div> Transaction ID Filter</h3>
+                            <p>Extracts transaction identifiers from the response.</p>
+                            <p><em>Example:</em> <code>response.data.txnId</code></p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">RF</div> Request ID Filter</h3>
+                            <p>Extracts request identifiers from the response.</p>
+                            <p><em>Example:</em> <code>response.data.requestId</code></p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <h3><div class="feature-icon">MF</div> Message Filter</h3>
+                            <p>Extracts message text from the response.</p>
+                            <p><em>Example:</em> <code>response.data.message</code></p>
+                        </div>
+                    </div>
+                    
+                    <div class="tip">
+                        <strong>Tip for JSON responses:</strong> Use dot notation or JSONPath syntax:
+                        <pre>response.data.balance</pre>
+                        <pre>$.response.data.balance</pre>
+                    </div>
+                    
+                    <div class="tip">
+                        <strong>Tip for XML responses:</strong> Use XPath syntax:
+                        <pre>//response/data/balance</pre>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="advanced" class="section">
+                <h2>Advanced Settings</h2>
+                <div class="card">
+                    <h3>Retry Count</h3>
+                    <p>The number of times the system will retry the API call if it fails.</p>
+                    
+                    <h3>Timeout (seconds)</h3>
+                    <p>The maximum time to wait for

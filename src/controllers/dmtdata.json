@@ -1,0 +1,154 @@
+{
+  "statuscode": "TXN",
+  "actcode": null,
+  "status": "Transaction Successful",
+  "data": {
+    "meta": {
+      "totalPages": 1,
+      "currentPage": 1,
+      "totalRecords": 5,
+      "recordsOnCurrentPage": 5,
+      "recordFrom": 1,
+      "recordTo": 5
+    },
+    "records": [
+      {
+        "outletId": 252757,
+        "lastActivityDt": "2025-07-15 17:44:25",
+        "name": "MUKESH KUMAR YADAV",
+        "mobile": "9660184238",
+        "email": "svrechargejaipur1@gmail.com",
+        "pan": "AGTPY6534E",
+        "bankAccounts": [
+          {
+            "accountNumber": "60055196387",
+            "ifsc": "MAHB0000978",
+            "addedAt": "2024-09-09 10:51:57",
+            "isPrimary": 1
+          },
+          {
+            "accountNumber": "39940200000449",
+            "ifsc": "BARB0NEHRUP",
+            "addedAt": "2024-07-13 10:56:30",
+            "isPrimary": 0
+          },
+          {
+            "accountNumber": "201000340811",
+            "ifsc": "INDB0000001",
+            "addedAt": "2024-06-08 17:52:02",
+            "isPrimary": 0
+          }
+        ],
+        "KYCStatus": true,
+        "isActive": true,
+        "Latitude": "26.94615",
+        "Longitude": "75.72551",
+        "bankAccount": [],
+        "products": {
+          "wapStatus": null
+        }
+      },
+      {
+        "outletId": 480331,
+        "lastActivityDt": "2025-04-21 19:07:59",
+        "name": "LUKESH KUMAR",
+        "mobile": "9672948704",
+        "email": "lokeshchopra04@gmail.com",
+        "pan": "HKUPK2576L",
+        "bankAccounts": [
+          {
+            "accountNumber": "50100726817887",
+            "ifsc": "HDFC0006534",
+            "addedAt": "2024-12-27 18:53:21",
+            "isPrimary": 1
+          }
+        ],
+        "KYCStatus": true,
+        "isActive": true,
+        "Latitude": "26.94642",
+        "Longitude": "75.72912",
+        "bankAccount": [],
+        "products": {
+          "wapStatus": null
+        }
+      },
+      {
+        "outletId": 491983,
+        "lastActivityDt": "2025-02-07 14:19:56",
+        "name": "MANISH YADAV",
+        "mobile": "7791859552",
+        "email": "mansihyadav761@gmail.com",
+        "pan": "AMQPY7340D",
+        "bankAccounts": [
+          {
+            "accountNumber": "38260100005082",
+            "ifsc": "BARB0KOTPUT",
+            "addedAt": "2025-02-07 14:17:32",
+            "isPrimary": 1
+          }
+        ],
+        "KYCStatus": true,
+        "isActive": true,
+        "Latitude": "26.94642",
+        "Longitude": "75.72912",
+        "bankAccount": [],
+        "products": {
+          "wapStatus": null
+        }
+      },
+      {
+        "outletId": 511943,
+        "lastActivityDt": "2025-05-20 10:07:25",
+        "name": "SANJAY KUMAWAT",
+        "mobile": "8562893342",
+        "email": "marwalmkwt@gmail.com",
+        "pan": "ERQPK9324A",
+        "bankAccounts": [
+          {
+            "accountNumber": "3906000100082294",
+            "ifsc": "PUNB0390600",
+            "addedAt": "2024-11-29 12:46:36",
+            "isPrimary": 1
+          }
+        ],
+        "KYCStatus": true,
+        "isActive": true,
+        "Latitude": "26.94642",
+        "Longitude": "75.72912",
+        "bankAccount": [],
+        "products": {
+          "wapStatus": null
+        }
+      },
+      {
+        "outletId": 528466,
+        "lastActivityDt": "2025-06-24 09:37:32",
+        "name": "HIRALAL SHARMA",
+        "mobile": "9414513089",
+        "email": "hiralalsharmalicritkrj5@gmail.com",
+        "pan": "AYQPS3752D",
+        "bankAccounts": [
+          {
+            "accountNumber": "04612011000328",
+            "ifsc": "PUNB0046110",
+            "addedAt": "2025-06-23 22:16:20",
+            "isPrimary": 1
+          }
+        ],
+        "KYCStatus": true,
+        "isActive": true,
+        "Latitude": "26.94642",
+        "Longitude": "75.72912",
+        "bankAccount": [],
+        "products": {
+          "wapStatus": null
+        }
+      }
+    ]
+  },
+  "timestamp": "2025-07-15 20:00:27",
+  "ipay_uuid": "h0009f65a968-654e-4810-bd79-84fcbcb19bc1-AeD4QCQeBgP4",
+  "orderid": null,
+  "environment": "LIVE",
+  "internalCode": null
+}
