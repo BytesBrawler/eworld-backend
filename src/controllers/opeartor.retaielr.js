@@ -255,7 +255,7 @@ async function removeCustomMargin({ retailerId, operatorId }) {
 //   const { lineId, keywordId, type } = req.body;
 
 //   // Push the job to a queue system
-//   await queue.add('updateLineBalanceJob', { lineId, keywordId, type });
+//   await queue.add('eworld-updateLineBalanceJob', { lineId, keywordId, type });
 
 //   return res.status(202).json(new ApiResponse(202, null, "Update request received. Balance update will be processed shortly."));
 // });
@@ -319,7 +319,7 @@ const updateLineBalance = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, {balance : finalBalance}, "Balance fetched succesfully"));
   
   } else {
-    await updateBalanceQueue.add("updateLineBalanceJob", {
+    await updateBalanceQueue.add("eworld-updateLineBalanceJob", {
       lineId,
       keywordId,
       type

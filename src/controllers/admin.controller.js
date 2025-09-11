@@ -173,7 +173,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 
   messageUtils.sendMessageToUser(
     user.id,
-    `Dear User, Your new password for SV Recharge is  ${password}`,
+    `Dear User, Your new password for eworld is  ${password}`,
     "number"
   );
   if (!updateUser) {

@@ -467,17 +467,17 @@ let originalAmount = amount;
  const balanceUpdate =  await balanceAddition(req.user, amount, user.id , originalAmount , {} , remark);
 //  messageUtils.sendMessageToUser(
 //   user.id,
-//   `Your SVRecharge wallet balance has been credited with ${amount}`,
+//   `Your Eworld wallet balance has been credited with ${amount}`,
 // );
 
 messageUtils.sendMessageToUser(
   user.id,
-  `Dear SV Recharge User (${user.person} ji), Balance of ${amount} is transfererd to your account , your new balance is ${balanceUpdate.balanceAfterAddition}`,
+  `Dear eworld User (${user.person} ji), Balance of ${amount} is transfererd to your account , your new balance is ${balanceUpdate.balanceAfterAddition}`,
   "number"
 );
 messageUtils.sendMessageToUser(
   req.user.id,
-  `Dear SV Recharge User, Balance of ${amount} is transfererd to ${user.person}(${user.mobile} -- new balance of user is ${balanceUpdate.balanceAfterAddition}). Your balance: ${balanceUpdate.balanceAfterDeduction}`,
+  `Dear eworld User, Balance of ${amount} is transfererd to ${user.person}(${user.mobile} -- new balance of user is ${balanceUpdate.balanceAfterAddition}). Your balance: ${balanceUpdate.balanceAfterDeduction}`,
   "number"
 );
 //   await query.deductBalance(req.user.id, amount);
@@ -558,7 +558,7 @@ const generateBalance = asyncHandler(async (req, res) => {
   // );
   messageUtils.sendMessageToUser(
     req.user.id,
-    `Your SVRecharge wallet balance has been credited with ${amount}`,
+    `Your Eworld wallet balance has been credited with ${amount}`,
   );
   res.status(200).json(new ApiResponse(200, geBalance, "Balance Added Succesfully"));
 //   await query.deductBalance(req.user.id, amount);
@@ -806,14 +806,14 @@ let originalAmount = amount;
 
 messageUtils.sendMessageToUser(
 userId,
-  `Dear SV Recharge User, Balance of ${amount} is transfererd to your account`,
+  `Dear eworld User, Balance of ${amount} is transfererd to your account`,
   "number"
 );
 
 
 messageUtils.sendMessageToUser(
   userId,
-  `Your SVRecharge wallet  balance has been credited with ${amount}}`,
+  `Your Eworld wallet  balance has been credited with ${amount}}`,
 
 );
 
@@ -1062,7 +1062,7 @@ const getepayGenerateOrder = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const userMobile = req.user.mobile || "9667027786";
   const userEmail = req.user.email || "imranchopdar13@gmail.com";
-  const companyName = "SVRecharge";
+  const companyName = "Eworld";
 
   // Step 1: Insert transaction with status 'initiated' to get the table ID
   const [insertResult] = await db.query(
@@ -1628,13 +1628,13 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
       // Send notification
       messageUtils.sendMessageToUser(
         userId,
-        `Dear SV Recharge User, Balance of ${processedAmount} has been added to your account via Getepay`,
+        `Dear eworld User, Balance of ${processedAmount} has been added to your account via Getepay`,
         "number"
       );
 
       messageUtils.sendMessageToUser(
         userId,
-        `Your SVRecharge wallet balance has been credited with ${processedAmount} via Getepay`
+        `Your Eworld wallet balance has been credited with ${processedAmount} via Getepay`
       );
 
       return { status: "success", message: "Balance added successfully via Getepay", data: statusData };

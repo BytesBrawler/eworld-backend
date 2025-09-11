@@ -50,10 +50,10 @@ if (process.env.REDIS_PASSWORD) {
 log('info', 'Redis connection config', connection);
 
 // Create queues
-const updateBalanceQueue = new Queue('updateLineBalanceJob', { connection });
-const appNotificationQueue = new Queue('appNotificationJob', { connection });
-const smsQueue = new Queue('smsMessageJob', { connection });
-const bulkMessagingQueue = new Queue('bulkMessagingJob', { connection });
+const updateBalanceQueue = new Queue('eworld-updateLineBalanceJob', { connection });
+const appNotificationQueue = new Queue('eworld-appNotificationJob', { connection });
+const smsQueue = new Queue('eworld-smsMessageJob', { connection });
+const bulkMessagingQueue = new Queue('eworld-bulkMessagingJob', { connection });
 
 
 // Database connection pool monitoring
@@ -216,7 +216,7 @@ const gracefulShutdown = async (signal) => {
 const workers = [];
 
 // Your existing worker for balance updates
-const udpateBalanceWorker = new Worker('updateLineBalanceJob', async job => {
+const udpateBalanceWorker = new Worker('eworld-updateLineBalanceJob', async job => {
   const { lineId, keywordId, type } = job.data;
   let line = [];
   console.log("lineId", lineId);
@@ -279,7 +279,7 @@ const udpateBalanceWorker = new Worker('updateLineBalanceJob', async job => {
 workers.push(udpateBalanceWorker);
 
 // Enhanced SMS worker with robust database connection handling
-const smsWorker = new Worker('smsMessageJob', async job => {
+const smsWorker = new Worker('eworld-smsMessageJob', async job => {
   const jobStartTime = Date.now();
   const jobId = job.id;
   
@@ -643,7 +643,7 @@ const smsWorker = new Worker('smsMessageJob', async job => {
 
 workers.push(smsWorker);
 // Enhanced App Notification Worker
-const appWorker = new Worker('appNotificationJob', async job => {
+const appWorker = new Worker('eworld-appNotificationJob', async job => {
   const jobStartTime = Date.now();
   const jobId = job.id;
   

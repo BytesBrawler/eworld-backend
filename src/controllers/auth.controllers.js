@@ -438,7 +438,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 //   messageUtils.sendMessageToUser(
 //     user.id,
-//     `Dear Svrecharge user, ${otp} is your otp for login in svrecharge and is valid for 5 min. Do not share this OTP with anyone.`,
+//     `Dear Eworld user, ${otp} is your otp for login in eworld and is valid for 5 min. Do not share this OTP with anyone.`,
 //     "number"
 //   );
 
@@ -510,7 +510,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 //   messageUtils.sendMessageToUser(
 //     user.id,
-//     `Welcome back ${user.person}, you have successfully logged in to SV Recharge`,
+//     `Welcome back ${user.person}, you have successfully logged in to eworld`,
 //     "number"
 //   );
 
@@ -923,7 +923,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
 //   messageUtils.sendMessageToUser(
 //     user.id,
-//     `Welcome back ${user.person}, you have successfully logged in to SV Recharge`,
+//     `Welcome back ${user.person}, you have successfully logged in to eworld`,
 //     "number"
 //   );
 

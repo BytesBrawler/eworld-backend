@@ -64,6 +64,7 @@ const retailerRoutes = require("./routes/retailer.routes.js")
 const generalRoutes = require("./routes/general.routes.js")
 const resellerRoutes = require("./routes/reseller.routes.js")
 const dmtRoutes = require("./routes/dmt.routes.js")
+const bbpsRoutes = require("./routes/bbps.routes.js")
 
 
 //routes declaration
@@ -80,6 +81,7 @@ app.use("/api/v1/retailers", retailerRoutes)
 app.use("/api/v1/general", generalRoutes)
 app.use("/api/v1/mtc", resellerRoutes)
 app.use("/api/v1/dmt" ,dmtRoutes )
+app.use("/api/v1/bbps", bbpsRoutes)
 
 //here i want to define some poitns which diereclty points to my htmo content in htmlcontnetn fodler 
 app.get("/apidoc", (req, res) => {

@@ -11,9 +11,9 @@ const connection = {
 };
 
 // Create message queues
-const appNotificationQueue = new Queue('appNotificationJob', { connection });
-const smsQueue = new Queue('smsMessageJob', { connection });
-const bulkQueue = new Queue('bulkMessagingJob', { connection });
+const appNotificationQueue = new Queue('eworld-appNotificationJob', { connection });
+const smsQueue = new Queue('eworld-smsMessageJob', { connection });
+const bulkQueue = new Queue('eworld-bulkMessagingJob', { connection });
 
 /**
  * Send message to user asynchronously
