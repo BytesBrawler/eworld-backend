@@ -147,7 +147,7 @@ const createUser = asyncHandler(async (req, res) => {
 
   messageUtils.sendMessageToUser(
     user.insertId,
-    `Welcome ${person}, your E-World account has been created successfully. Your password is ${password}. Send HELP to 9024312345 for assistance.`,
+    `Welcome ${person}, your E-World account has been created successfully. Your password is ${password}. Send HELP to 8003176786 for assistance.`,
     "number"
   );
   messageUtils.sendMessageToUser(
