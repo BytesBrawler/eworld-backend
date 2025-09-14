@@ -176,7 +176,8 @@ async function getPurchasesReports(userId, options) {
     END AS reference_id,
     bt.prev_balance,
     bt.new_balance,
-    bt.remark
+    bt.remark,
+    bt.balance_type
   FROM bal_transactions AS bt
   WHERE bt.to_id = ?
 `;
@@ -217,7 +218,8 @@ let secondQuery = `
     t.reference_id,
     NULL AS prev_balance,
     NULL AS new_balance,
-    t.payment_mode AS remark
+    t.payment_mode AS remark,
+    NULL AS balance_type
   FROM transactions AS t
   WHERE t.user_id = ?
 `;
@@ -589,7 +591,8 @@ async function getRecents(userId,role) {
       r.status,
       r.reqid as details,
       k.description as operator_name,
-      'recharge' as transaction_type
+      'recharge' as transaction_type,
+      NULL as balance_type
     FROM recharges as r
     LEFT JOIN keywords as k ON r.keyword_id = k.id
     WHERE r.user_id = ?)
@@ -603,7 +606,8 @@ async function getRecents(userId,role) {
       bt.status,
       bt.remark as details,
       NULL as operator_name,
-      'balance' as transaction_type
+      'balance' as transaction_type,
+      bt.balance_type
     FROM bal_transactions as bt
     WHERE bt.to_id = ?)
   
@@ -619,7 +623,8 @@ async function getRecents(userId,role) {
       r.status,
       r.remark as details,
       'purchase' as transaction_type,
-      NULL as operator_name
+      NULL as operator_name,
+      r.balance_type
     FROM bal_transactions as r
     WHERE r.to_id = ?)
     
@@ -632,7 +637,8 @@ async function getRecents(userId,role) {
       bt.status,
       bt.remark as details,
       u.company as transaction_type,
-      u.mobile as operator_name
+      u.mobile as operator_name,
+      bt.balance_type
     FROM bal_transactions as bt
     LEFT JOIN users as u ON bt.to_id = u.id
     WHERE bt.user_id = ?)

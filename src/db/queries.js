@@ -402,10 +402,11 @@ async function addBalanceTransaction(
   maalikNewBalance,
   referenceId,
   type,
-  remark
+  remark,
+  balanceType = 'transfer'
 ) {
   await db.query(
-    "INSERT INTO bal_transactions (user_id, to_id, transaction_type, amount,original_amount, status, prev_balance, new_balance, maalik_prev_balance , maalik_new_balance ,reference_id, remark) VALUES (?, ?, ?, ?,?,?, ?, ?,?, ?, ?, ?)",
+    "INSERT INTO bal_transactions (user_id, to_id, transaction_type, amount,original_amount, status, prev_balance, new_balance, maalik_prev_balance , maalik_new_balance ,reference_id, remark, balance_type) VALUES (?, ?, ?, ?,?,?, ?, ?,?, ?, ?, ?, ?)",
     [
       userId,
       toId,
@@ -418,7 +419,8 @@ async function addBalanceTransaction(
       maalikPrevBalance,
       maalikNewBalance,
       referenceId,
-      remark
+      remark,
+      balanceType
     ]
   );
 }
@@ -1054,7 +1056,8 @@ async function getReports(userId, options = {}) {
       CASE 
         WHEN bt.amount < 0 THEN 'withdraw'
         ELSE  bt.transaction_type
-      END AS transaction_type
+      END AS transaction_type,
+      bt.balance_type
     FROM bal_transactions bt
     LEFT JOIN users TO_USER ON bt.to_id = TO_USER.id
     WHERE bt.user_id = ?
@@ -1232,7 +1235,8 @@ async function getStatement(userId, options = {}) {
     CASE 
       WHEN bt.user_id = ? THEN 'transfer'
       WHEN bt.to_id = ? THEN 'purchase' 
-    END AS type
+    END AS type,
+    bt.balance_type
   FROM bal_transactions bt
   LEFT JOIN users TO_USER ON bt.to_id = TO_USER.id
   LEFT JOIN users FROM_USER ON bt.user_id = FROM_USER.id
@@ -2722,8 +2726,8 @@ async function processRechargeRefund(rechargeId, { adminId, remarks }) {
         await connection.query(
             `INSERT INTO bal_transactions 
              (user_id, to_id, transaction_type, amount, status, 
-              prev_balance, new_balance, reference_id, remark) 
-             VALUES (?, ?, 'refund', ?, 'success', ?, ?, ?, ?)`,
+              prev_balance, new_balance, reference_id, remark, balance_type) 
+             VALUES (?, ?, 'refund', ?, 'success', ?, ?, ?, ?, ?)`,
             [
                 adminId,
                 recharge.user_id,
@@ -2731,7 +2735,8 @@ async function processRechargeRefund(rechargeId, { adminId, remarks }) {
                 0, // prev_balance will be calculated
                 0, // new_balance will be calculated
                 `REF-${rechargeId}`,
-                remarks
+                remarks,
+                'refund' // Refund is 'refund' not 'credit'
             ]
         );
 
@@ -3422,8 +3427,106 @@ getKeywordById,
   getAPiProvidersByName,
   getUserToken,
   createOrder,
-  getUsersbyParentIdForSuperAdmin
-
-
+  getUsersbyParentIdForSuperAdmin,
+  searchParentUsers,
+  getAllChildrenForParent
 
 };
+
+// Search parent users (role_id 3 or 4) for admin
+async function searchParentUsers(searchTerm) {
+  try {
+    const query = `
+      SELECT 
+        u.id,
+        u.person,
+        u.mobile,
+        u.company,
+        u.balance,
+        u.role_id,
+        r.description as role,
+        (SELECT COUNT(*) FROM users WHERE parent_id = u.id AND role_id > u.role_id) as children_count
+      FROM users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      WHERE 
+        u.role_id IN (3, 4, 5) AND 
+        u.status = 'active' AND
+        (SELECT COUNT(*) FROM users WHERE parent_id = u.id AND status = 'active') > 0 AND
+        (u.mobile LIKE ? OR u.person LIKE ? OR u.company LIKE ? OR u.id LIKE ?)
+      ORDER BY u.role_id ASC, u.person ASC
+      LIMIT 50
+    `;
+    
+    const searchPattern = `%${searchTerm}%`;
+    const [rows] = await db.execute(query, [searchPattern, searchPattern, searchPattern, searchPattern]);
+    return rows;
+  } catch (error) {
+    console.error('Error searching parent users:', error);
+    throw error;
+  }
+}
+
+// Get all children for a parent (direct and indirect descendants)
+async function getAllChildrenForParent(parentId) {
+  try {
+    const query = `
+      WITH RECURSIVE user_hierarchy AS (
+        -- Base case: direct children
+        SELECT 
+          u.id,
+          u.person,
+          u.mobile,
+          u.company,
+          u.balance,
+          u.role_id,
+          u.parent_id,
+          u.status,
+          r.description as role,
+          1 as level,
+          CAST(u.person AS CHAR(1000)) as path
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        WHERE u.parent_id = ? AND u.status = 'active'
+        
+        UNION ALL
+        
+        -- Recursive case: children of children
+        SELECT 
+          u.id,
+          u.person,
+          u.mobile,
+          u.company,
+          u.balance,
+          u.role_id,
+          u.parent_id,
+          u.status,
+          r.description as role,
+          uh.level + 1,
+          CONCAT(uh.path, ' → ', u.person)
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        INNER JOIN user_hierarchy uh ON u.parent_id = uh.id
+        WHERE u.status = 'active' AND uh.level < 3  -- Limit depth to avoid infinite recursion
+      )
+      SELECT DISTINCT
+        id,
+        person,
+        mobile,
+        company,
+        balance,
+        role_id,
+        parent_id,
+        role,
+        level,
+        path
+      FROM user_hierarchy
+      ORDER BY level ASC, role_id ASC, person ASC
+    `;
+    
+    const [rows] = await db.execute(query, [parentId]);
+    return rows;
+  } catch (error) {
+    console.error('Error getting all children for parent:', error);
+    throw error;
+  }
+}

@@ -30,5 +30,10 @@ router.route("/getepay/refund").post(verifyAuth, controller.getepayRefund);
 router.route("/getepay/status-logs/:orderId").get(verifyAuth, controller.getTransactionStatusLogs);
 router.route("/getepay/recent-transactions").get(verifyAuth, controller.getRecentTransactions);
 
+// Admin transfer routes
+router.route("/admin/search-parents").get(verifyAuth, controller.searchParentUsers);
+router.route("/admin/parent-children/:parentId").get(verifyAuth, controller.getParentChildren);
+router.route("/admin/transfer-balance").post(verifyAuth, controller.adminTransferBalance);
+router.route("/admin/refund-balance").post(verifyAuth, controller.adminRefundBalance);
 
 module.exports = router ;

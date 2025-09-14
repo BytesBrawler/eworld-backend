@@ -9,6 +9,56 @@ const messageUtils = require("../utils/sendMessage");
 const crypto = require("crypto");
 const axios = require("axios");
 
+// Utility function to determine balance type based on context
+function getBalanceType(fromUser, toUser, transactionType, operationType = null) {
+  // If it's an online payment, it's always a transfer
+  if (transactionType === 'online') {
+    return 'transfer';
+  }
+
+  // Check for refund operations first (recharge failures, auto refunds)
+  if (operationType === 'refund' || transactionType === 'refund' || 
+      (operationType && operationType.includes('refund'))) {
+    return 'refund';
+  }
+
+  // For offline transactions, determine based on roles and operation
+  const fromUserRole = fromUser.role || fromUser.role_id;
+  const toUserRole = toUser ? (toUser.role || toUser.role_id) : null;
+
+  // If superadmin (role 1) or admin (role 2) is doing MANUAL operations
+  if (fromUserRole <= 2) {
+    // Manual admin deduct balance operation
+    if (operationType === 'deduct' || operationType === 'manual_deduct' || 
+        (operationType && operationType.includes('deduct'))) {
+      return 'debit';
+    }
+    // Manual admin add balance operation  
+    if (operationType === 'add' || operationType === 'manual_add' || operationType === 'credit' || 
+        (operationType && operationType.includes('add'))) {
+      return 'credit';
+    }
+  }
+
+  // For parent-child relationships (role > 2)
+  if (toUser && fromUserRole > 2) {
+    // Parent deducting from child is a refund
+    if (operationType === 'refund' || (operationType && operationType.includes('refund'))) {
+      return 'refund';
+    }
+    // Parent transferring to child is a transfer
+    return 'transfer';
+  }
+
+  // For fund requests and normal transfers between users
+  if (operationType === 'transfer' || !operationType) {
+    return 'transfer';
+  }
+
+  // Default to transfer for other cases
+  return 'transfer';
+}
+
 // Getepay Utility Functions
 class GetepayUtils {
   static getConfig() {
@@ -280,7 +330,7 @@ const approveFund = asyncHandler(async (req, res) => {
   if (Number(fundRequest.amount) > Number(req.user.balance)) {
     throw new ApiError(400, "Insufficient balance");
   }
- const balanceAdd =  await balanceAddition(req.user, fundRequest.amount, fundRequest.user_id);
+ const balanceAdd =  await balanceAddition(req.user, fundRequest.amount, fundRequest.user_id, fundRequest.amount, {operationType: 'transfer'});
  await query.updateFundRequestStatus(fundRequest.id, "approved", req.user.id);
  console.log(balanceAdd);
 
@@ -289,7 +339,7 @@ const approveFund = asyncHandler(async (req, res) => {
 
 
 async function balanceAddition(parent_user, amount, userId,originalAmount, options = {},remark) {
-  const { orderId = null, type = 'offline' } = options;
+  const { orderId = null, type = 'offline', operationType = 'add' } = options;
   const balanceBeforeDeduction = parent_user.balance;
 
   const balanceBeforeAddition = await query.getBalance(userId);
@@ -308,6 +358,10 @@ async function balanceAddition(parent_user, amount, userId,originalAmount, optio
 
   console.log(status);
 
+  // Get the user details for balance type determination
+  const toUser = await query.findUserById(userId);
+  const balanceType = getBalanceType(parent_user, toUser, type, operationType);
+
   await query.addBalanceTransaction(
     parent_user.id,
     userId,
@@ -320,12 +374,13 @@ async function balanceAddition(parent_user, amount, userId,originalAmount, optio
     balanceAfterDeduction,
     orderId,
     type,
-    remark
+    remark,
+    balanceType
   );
   return { status, balanceBeforeAddition, balanceAfterAddition, balanceBeforeDeduction, balanceAfterDeduction };
 }
 
-async function balanceWithdraw(parent_user, amount, userId, originalAmount, remark, generateItsEntry = true) {
+async function balanceWithdraw(parent_user, amount, userId, originalAmount, remark, generateItsEntry = true, operationType = 'transfer') {
   //generate order idon basisi of  as userid and timestamp
   const orderId = `${userId}-${Date.now()}`;
   const type = 'offline';
@@ -350,6 +405,11 @@ async function balanceWithdraw(parent_user, amount, userId, originalAmount, rema
 
     console.log("Withdrawal with ITS entry:", status);
 
+    // Get the user details for balance type determination
+    const toUser = await query.findUserById(userId);
+    // Use the provided operation type for balance type determination
+    const balanceType = getBalanceType(parent_user, toUser, type, operationType);
+
     await query.addBalanceTransaction(
       parent_user.id,
       userId,
@@ -362,7 +422,8 @@ async function balanceWithdraw(parent_user, amount, userId, originalAmount, rema
       balanceAfterDeduction,
       orderId,
       type,
-      remark
+      remark,
+      balanceType
     );
     return { status, balanceBeforeAddition, balanceAfterAddition, balanceBeforeDeduction, balanceAfterDeduction };
   } else {
@@ -464,7 +525,9 @@ let originalAmount = amount;
     throw new ApiError(400, "Insufficient balance");
   }
 
- const balanceUpdate =  await balanceAddition(req.user, amount, user.id , originalAmount , {} , remark);
+ // Determine operation type based on user role - admin manual addition is 'credit', parent transfer is 'transfer'  
+ const operationType = req.user.role <= 2 ? 'credit' : 'transfer';
+ const balanceUpdate =  await balanceAddition(req.user, amount, user.id , originalAmount , {operationType} , remark);
 //  messageUtils.sendMessageToUser(
 //   user.id,
 //   `Your Eworld wallet balance has been credited with ${amount}`,
@@ -519,7 +582,9 @@ let originalAmount = amount;
 
 console.log("user" ,user);
 
-  const balanceUpdate =  await balanceWithdraw(req.user, amount, user.id, originalAmount, remark, generateItsEntry);
+  // Determine operation type based on user role - admin manual deduction is 'debit', parent deduction is 'refund'
+  const operationType = req.user.role <= 2 ? 'deduct' : 'refund';
+  const balanceUpdate =  await balanceWithdraw(req.user, amount, user.id, originalAmount, remark, generateItsEntry, operationType);
 
   
 
@@ -791,7 +856,7 @@ let originalAmount = amount;
     }
 
     // 4. Add balance to user
-    const result = await balanceAddition(admin, amount, userId ,originalAmount, {orderId , type: 'online'});
+    const result = await balanceAddition(admin, amount, userId ,originalAmount, {orderId , type: 'online', operationType: 'transfer'});
 
     if (result.status !== "success") {
       return { status: "error", message: "Balance addition failed" };
@@ -1607,7 +1672,8 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
       // Add balance to user
       const result = await balanceAddition(admin, processedAmount, userId, originalAmount, {
         orderId, 
-        type: 'online'
+        type: 'online',
+        operationType: 'transfer'
       });
 
       if (result.status !== "success") {
@@ -1701,6 +1767,293 @@ const getTransactionStatusLogs = asyncHandler(async (req, res) => {
   }
 });
 
+// Search parent users for admin transfer functionality
+const searchParentUsers = asyncHandler(async (req, res) => {
+  const { search } = req.query;
+  
+  // Check if user is admin or superadmin
+  if (req.user.role > 2) {
+    throw new ApiError(403, "Access denied. Admin privileges required.");
+  }
+  
+  if (!search || search.length < 3) {
+    throw new ApiError(400, "Search term must be at least 3 characters long");
+  }
+  
+  try {
+    const parents = await query.searchParentUsers(search);
+    
+    res.status(200).json(new ApiResponse(200, {
+      parents,
+      count: parents.length
+    }, "Parent users fetched successfully"));
+    
+  } catch (error) {
+    console.error("Error searching parent users:", error);
+    throw new ApiError(500, "Failed to search parent users");
+  }
+});
+
+// Get children of a selected parent for admin transfer
+const getParentChildren = asyncHandler(async (req, res) => {
+  const { parentId } = req.params;
+  
+  // Check if user is admin or superadmin
+  if (req.user.role > 2) {
+    throw new ApiError(403, "Access denied. Admin privileges required.");
+  }
+  
+  if (!parentId) {
+    throw new ApiError(400, "Parent ID is required");
+  }
+  
+  try {
+    // Get parent info first
+    const parent = await query.findUserById(parentId);
+    if (!parent) {
+      throw new ApiError(404, "Parent user not found");
+    }
+    
+    if (parent.role_id < 3) {
+      throw new ApiError(400, "Selected user is not a valid parent (distributor/master)");
+    }
+    
+    // Get all children (both direct and indirect)
+    const children = await query.getAllChildrenForParent(parentId);
+    
+    res.status(200).json(new ApiResponse(200, {
+      parent: {
+        id: parent.id,
+        person: parent.person,
+        mobile: parent.mobile,
+        company: parent.company,
+        balance: parent.balance,
+        role_id: parent.role_id
+      },
+      children,
+      count: children.length
+    }, "Parent children fetched successfully"));
+    
+  } catch (error) {
+    console.error("Error fetching parent children:", error);
+    throw new ApiError(500, "Failed to fetch parent children");
+  }
+});
+
+// Admin transfer balance on behalf of parent to child
+const adminTransferBalance = asyncHandler(async (req, res) => {
+  const { parentId, childId, amount, remarks = 'Admin transfer' } = req.body;
+  
+  // Check if user is admin or superadmin
+  if (req.user.role > 2) {
+    throw new ApiError(403, "Access denied. Admin privileges required.");
+  }
+  
+  if (!parentId || !childId || !amount) {
+    throw new ApiError(400, "Parent ID, Child ID, and amount are required");
+  }
+  
+  if (amount <= 0) {
+    throw new ApiError(400, "Amount must be greater than 0");
+  }
+  
+  try {
+    // Get parent and child info
+    const parent = await query.findUserById(parentId);
+    const child = await query.findUserById(childId);
+    
+    if (!parent || !child) {
+      throw new ApiError(404, "Parent or child user not found");
+    }
+    
+    // Verify parent-child relationship
+    if (child.parent_id !== parent.id) {
+      throw new ApiError(400, "Invalid parent-child relationship");
+    }
+
+    // Apply margin calculation logic
+    let originalAmount = amount;
+
+    if(child.is_flat_margin === 1){
+      amount = amount + child.margin_rates * amount / 100;
+    }
+
+    console.log("amount", amount);
+
+    if (parent.balance < amount) {
+      throw new ApiError(400, "Insufficient balance in parent account");
+    }
+    
+    // Start transaction
+    // await db.beginTransaction();
+    
+    try {
+      // Determine operation type based on user role - admin manual addition is 'credit', parent transfer is 'transfer'  
+      const operationType = req.user.role <= 2 ? 'credit' : 'transfer';
+      const balanceUpdate = await balanceAddition(parent, amount, child.id, originalAmount, {operationType}, remarks);
+      
+      // Send messages to both parent and child
+      messageUtils.sendMessageToUser(
+        child.id,
+        `Dear eworld User (${child.person} ji), Balance of ${originalAmount} is transferred to your account by admin, your new balance is ${balanceUpdate.balanceAfterAddition}`,
+        "number"
+      );
+      messageUtils.sendMessageToUser(
+        parent.id,
+        `Dear eworld User, Balance of ${originalAmount} is transferred from your account to ${child.person}(${child.mobile}) by admin. Your new balance: ${balanceUpdate.balanceAfterDeduction}`,
+        "number"
+      );
+      
+      // await db.commit();
+      
+      res.status(200).json(new ApiResponse(200, {
+        transfer: {
+          amount: originalAmount,
+          actualAmount: amount,
+          from: {
+            id: parent.id,
+            person: parent.person,
+            mobile: parent.mobile,
+            oldBalance: balanceUpdate.balanceBeforeDeduction,
+            newBalance: balanceUpdate.balanceAfterDeduction
+          },
+          to: {
+            id: child.id,
+            person: child.person,
+            mobile: child.mobile,
+            oldBalance: balanceUpdate.balanceBeforeAddition,
+            newBalance: balanceUpdate.balanceAfterAddition
+          },
+          adminUser: {
+            id: req.user.id,
+            person: req.user.person,
+            mobile: req.user.mobile
+          },
+          remarks,
+          timestamp: new Date()
+        }
+      }, "Balance transferred successfully"));
+      
+    } catch (error) {
+     // await db.rollback();
+      throw error;
+    }
+    
+  } catch (error) {
+    console.error("Error in admin transfer:", error);
+    throw new ApiError(500, "Failed to transfer balance");
+  }
+});
+
+// Admin refund balance from child back to parent
+const adminRefundBalance = asyncHandler(async (req, res) => {
+  const { childId, parentId, amount, remarks = 'Admin refund' } = req.body;
+  
+  // Check if user is admin or superadmin
+  if (req.user.role > 2) {
+    throw new ApiError(403, "Access denied. Admin privileges required.");
+  }
+  
+  if (!childId || !parentId || !amount) {
+    throw new ApiError(400, "Child ID, Parent ID, and amount are required");
+  }
+  
+  if (amount <= 0) {
+    throw new ApiError(400, "Amount must be greater than 0");
+  }
+  
+  try {
+    // Get parent and child info
+    const child = await query.findUserById(childId);
+    const parent = await query.findUserById(parentId);
+    
+    if (!child || !parent) {
+      throw new ApiError(404, "Child or parent user not found");
+    }
+    
+    // Verify parent-child relationship (direct or indirect)
+    const allChildren = await query.getAllChildrenForParent(parentId);
+    const isValidChild = allChildren.some(c => c.id === parseInt(childId));
+    
+    if (!isValidChild) {
+      throw new ApiError(400, "Invalid parent-child relationship");
+    }
+
+    // Apply margin calculation logic
+    let originalAmount = amount;
+
+    if(child.is_flat_margin === 1){
+      amount = amount + child.margin_rates * amount / 100;
+    }
+
+    console.log("amount", amount);
+
+    if (child.balance < amount) {
+      throw new ApiError(400, "Insufficient balance in child account");
+    }
+    
+    // Start transaction
+  
+    
+    try {
+      // For refund: child is the source (like req.user), parent is the target (like user)
+      // Determine operation type - admin refund is 'refund'
+      const operationType = 'refund';
+      const balanceUpdate = await balanceAddition(child, amount, parent.id, originalAmount, {operationType}, remarks);
+      
+      // Send messages to both parent and child
+      messageUtils.sendMessageToUser(
+        child.id,
+        `Dear eworld User (${child.person} ji), Balance of ${originalAmount} is refunded from your account by admin, your new balance is ${balanceUpdate.balanceAfterAddition}`,
+        "number"
+      );
+      messageUtils.sendMessageToUser(
+        parent.id,
+        `Dear eworld User, Balance of ${originalAmount} is refunded to your account from ${child.person}(${child.mobile}) by admin. Your new balance: ${balanceUpdate.balanceAfterDeduction}`,
+        "number"
+      );
+      
+
+      
+      res.status(200).json(new ApiResponse(200, {
+        refund: {
+          amount: originalAmount,
+          actualAmount: amount,
+          from: {
+            id: child.id,
+            person: child.person,
+            mobile: child.mobile,
+            oldBalance: balanceUpdate.balanceBeforeAddition,
+            newBalance: balanceUpdate.balanceAfterAddition
+          },
+          to: {
+            id: parent.id,
+            person: parent.person,
+            mobile: parent.mobile,
+            oldBalance: balanceUpdate.balanceBeforeDeduction,
+            newBalance: balanceUpdate.balanceAfterDeduction
+          },
+          adminUser: {
+            id: req.user.id,
+            person: req.user.person,
+            mobile: req.user.mobile
+          },
+          remarks,
+          timestamp: new Date()
+        }
+      }, "Balance refunded successfully"));
+      
+    } catch (error) {
+     
+      throw error;
+    }
+    
+  } catch (error) {
+    console.error("Error in admin refund:", error);
+    throw new ApiError(500, "Failed to refund balance");
+  }
+});
+
 module.exports = {
   getBalance,
   fundRequest,
@@ -1726,4 +2079,9 @@ module.exports = {
   getepayRefund,
   getTransactionStatusLogs,
   getRecentTransactions,
+  // Admin transfer methods
+  searchParentUsers,
+  getParentChildren,
+  adminTransferBalance,
+  adminRefundBalance,
 };

@@ -629,8 +629,8 @@ if(lastgig !== null && lastgig !== undefined){
     //update balacne transaction record 
     if(finalStatus == 'failed' && (recharge.status === 'success' || recharge.status === 'pending')){
       await db.query(
-        `INSERT INTO bal_transactions (to_id, amount, original_amount, prev_balance, new_balance, reference_id,  remark, status, maalik_prev_balance, maalik_new_balance)
-         VALUES (?, ?, ?, ?, ?, ?,  ?, ?,?,?)`,
+        `INSERT INTO bal_transactions (to_id, amount, original_amount, prev_balance, new_balance, reference_id,  remark, status, maalik_prev_balance, maalik_new_balance, balance_type)
+         VALUES (?, ?, ?, ?, ?, ?,  ?, ?,?,?, ?)`,
         [
           recharge.user_id,
           recharge.deducted_amount,
@@ -641,7 +641,8 @@ if(lastgig !== null && lastgig !== undefined){
           `Recharge Amount refunded for ${recharge.number}(${keywordDetails.description} ) at ${recharge.created_at}`,
           "success", // Provide a value for 'status' if needed, otherwise leave as empty string
           0,
-          0
+          0,
+          'refund' // Recharge refund is 'refund' not 'credit'
         ]
       );
     }
