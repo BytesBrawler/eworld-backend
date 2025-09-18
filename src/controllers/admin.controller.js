@@ -605,11 +605,10 @@ if(lastgig !== null && lastgig !== undefined){
     recharge.message = "Recharge failed";
 
     const [updateRecharge] = await db.query(
-      `UPDATE recharges SET status = ?, message = ? , deducted_amount = ?, completed_at = ?  , com_parent = ? , com_superparent = ? ,parent_id = ? , superparent_id = ? WHERE id = ?`,
+      `UPDATE recharges SET status = ?, message = ? , completed_at = ?  , com_parent = ? , com_superparent = ? ,parent_id = ? , superparent_id = ? WHERE id = ?`,
       [
       (finalStatus == 'failed' && (recharge.status === 'success' || recharge.status === 'pending')) ? 'refunded' : "failed",
       (finalStatus == 'failed' && (recharge.status === 'success' || recharge.status === 'pending')) ? 'Recharge Amount refunded' : "Recharge failed",
-      0,
       new Date(),
       null,
       null,

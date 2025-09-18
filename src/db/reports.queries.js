@@ -370,9 +370,10 @@ async function getPurchasesReportsOnline  ({
         t.id as transaction_id,
         t.amount,
         t.status,
-        t.order_id,
+        t.order_id as order_id,
         t.reference_id,
         t.payment_mode,
+        t.gateway as gateway,
         t.payment_details,
         t.gateway_response,
         t.created_at,
@@ -430,6 +431,7 @@ async function getPurchasesReportsOnline  ({
 
     // Execute count query
     const [countResult] = await db.query(countQuery, queryParams);
+    console.log("Count result:", countResult);
     const totalItems = countResult[0].total;
 
     // Add pagination
@@ -442,6 +444,10 @@ async function getPurchasesReportsOnline  ({
 
     console.log("main query results", results);
 
+    if(results.length === 0) {
+      return []
+    }
+
     // Process results to format them properly
     const formattedResults = results.map(item => {
       return {
@@ -449,6 +455,8 @@ async function getPurchasesReportsOnline  ({
         amount: item.amount,
         status: item.status,
         reference_id: item.reference_id || item.order_id,
+        order_id: item.order_id,
+        gateway: item.gateway,
         payment_mode: item.payment_mode,
         payment_details: item.payment_details,
         gateway_response: item.gateway_response,
@@ -472,10 +480,10 @@ async function getPurchasesReportsOnline  ({
     const data={
       transactions: formattedResults,
       pagination: {
-        total: totalItems,
+        total: totalItems || 0,
         page: parseInt(page),
         limit: parseInt(limit),
-        pages: Math.ceil(totalItems / parseInt(limit))
+        pages: Math.ceil(totalItems / parseInt(limit)) || 1
       }
     };
 

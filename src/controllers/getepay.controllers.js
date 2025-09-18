@@ -185,8 +185,16 @@ const checkGetepayStatus = asyncHandler(async (req, res) => {
 
         const txn = transaction[0];
         
-        // If transaction is still pending, query Getepay for status
-        if (txn.status === 'PENDING') {
+        // Log the status check attempt
+        const requestData = {
+            merchantTransactionId: orderId,
+            transactionDate: txn.created_at,
+            userId: req.user.id,
+            checkTime: new Date().toISOString()
+        };
+
+        // If transaction is still pending, initiated, or we want to recheck, query Getepay for status
+        if (txn.status === 'pending' || txn.status === 'initiated' || txn.status === 'PENDING') {
             const config = await getepay.getConfig();
             
             const requeryRequest = {
@@ -194,42 +202,131 @@ const checkGetepayStatus = asyncHandler(async (req, res) => {
                 transactionDate: txn.created_at
             };
             
-            const statusResponse = await getepay.requeryRequest(config, requeryRequest);
+            let statusResponse;
+            let statusCheckSuccess = false;
             
-            if (statusResponse) {
-                let newStatus = 'FAILED';
+            try {
+                statusResponse = await getepay.requeryRequest(config, requeryRequest);
+                statusCheckSuccess = true;
+            } catch (gatewayError) {
+                statusResponse = {
+                    error: true,
+                    message: gatewayError.message || 'Gateway API call failed',
+                    statusCode: gatewayError.statusCode || 500
+                };
+            }
+            
+            // Log this status check attempt
+            await db.query(`
+                INSERT INTO transaction_status_logs (
+                    order_id, transaction_id, gateway, check_type, 
+                    gateway_txn_id, gateway_status, payment_mode, txn_amount,
+                    settlement_amount, bank_ref_no, payment_id, txn_date,
+                    settlement_date, error_code, error_message, gateway_response,
+                    request_data, previous_status, updated_status, status_changed,
+                    balance_added, balance_processed, created_at
+                ) VALUES (?, ?, 'GETEPAY', 'status_check', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+            `, [
+                orderId, 
+                txn.id,
+                statusResponse?.txnId || statusResponse?.transactionId || null,
+                statusResponse?.status || statusResponse?.txnStatus || 'UNKNOWN',
+                statusResponse?.paymentMode || null,
+                txn.amount,
+                statusResponse?.settlementAmount || null,
+                statusResponse?.bankRefNo || statusResponse?.rrn || null,
+                statusResponse?.paymentId || null,
+                statusResponse?.txnDate ? new Date(statusResponse.txnDate) : null,
+                statusResponse?.settlementDate ? new Date(statusResponse.settlementDate) : null,
+                statusResponse?.errorCode || statusResponse?.code || null,
+                statusResponse?.message || statusResponse?.statusDesc || statusResponse?.error || null,
+                JSON.stringify(statusResponse || {}),
+                JSON.stringify(requestData),
+                txn.status,
+                null, // Will be updated below if status changes
+                false, // Will be updated below if status changes
+                0, // Will be updated below if balance is added
+                false // Will be updated below if balance is processed
+            ]);
+
+            const logId = await db.query("SELECT LAST_INSERT_ID() as id");
+            const statusLogId = logId[0].id;
+            
+            if (statusCheckSuccess && statusResponse && !statusResponse.error) {
+                let newStatus = txn.status; // Keep current status as default
                 let errorMessage = '';
+                let balanceAdded = 0;
+                let balanceProcessed = false;
+                let statusChanged = false;
                 
                 if (statusResponse.status === 'SUCCESS' || statusResponse.txnStatus === 'SUCCESS') {
-                    newStatus = 'SUCCESS';
+                    newStatus = 'success';
+                    statusChanged = true;
                     
-                    // Add money to user's wallet if not already added
-                    await db.query(
-                        "UPDATE users SET balance = balance + ? WHERE id = ?",
-                        [txn.amount, txn.user_id]
+                    // Check if balance was already added to prevent double crediting
+                    const existingWalletTxn = await db.query(
+                        "SELECT * FROM wallet_transactions WHERE reference_id = ? AND type = 'CREDIT'",
+                        [orderId]
                     );
                     
-                    // Insert wallet transaction record
-                    await db.query(`
-                        INSERT INTO wallet_transactions (
-                            user_id, type, amount, description, reference_id, created_at
-                        ) VALUES (?, 'CREDIT', ?, 'Money added via Getepay', ?, NOW())
-                    `, [txn.user_id, txn.amount, orderId]);
+                    if (!existingWalletTxn || existingWalletTxn.length === 0) {
+                        // Add money to user's wallet
+                        await db.query(
+                            "UPDATE users SET balance = balance + ? WHERE id = ?",
+                            [txn.amount, txn.user_id]
+                        );
+                        
+                        // Insert wallet transaction record
+                        await db.query(`
+                            INSERT INTO wallet_transactions (
+                                user_id, type, amount, description, reference_id, created_at
+                            ) VALUES (?, 'CREDIT', ?, 'Money added via Getepay', ?, NOW())
+                        `, [txn.user_id, txn.amount, orderId]);
+                        
+                        balanceAdded = parseFloat(txn.amount);
+                        balanceProcessed = true;
+                    }
                     
-                } else {
+                } else if (statusResponse.status === 'FAILED' || statusResponse.txnStatus === 'FAILED') {
+                    newStatus = 'failed';
+                    statusChanged = true;
                     errorMessage = statusResponse.message || statusResponse.statusDesc || 'Transaction failed';
+                } else {
+                    // Transaction is still pending/processing
+                    errorMessage = statusResponse.message || statusResponse.statusDesc || 'Transaction is still processing';
                 }
 
-                // Update transaction status
+                // Update transaction status if it changed
+                if (statusChanged) {
+                    await db.query(`
+                        UPDATE transactions 
+                        SET status = ?, gateway_response = ?, updated_at = NOW()
+                        WHERE order_id = ?
+                    `, [newStatus, JSON.stringify(statusResponse), orderId]);
+                    
+                    txn.status = newStatus;
+                }
+
+                // Update the status log with final results
                 await db.query(`
-                    UPDATE transactions 
-                    SET status = ?, gateway_response = ?, error_message = ?, updated_at = NOW()
-                    WHERE order_id = ?
-                `, [newStatus, JSON.stringify(statusResponse), errorMessage, orderId]);
-                
-                txn.status = newStatus;
-                txn.error_message = errorMessage;
+                    UPDATE transaction_status_logs 
+                    SET updated_status = ?, status_changed = ?, balance_added = ?, balance_processed = ?
+                    WHERE id = ?
+                `, [newStatus, statusChanged, balanceAdded, balanceProcessed, statusLogId]);
             }
+        } else {
+            // Transaction is already in final state, just log the check
+            await db.query(`
+                INSERT INTO transaction_status_logs (
+                    order_id, transaction_id, gateway, check_type, 
+                    gateway_status, txn_amount, gateway_response, request_data, 
+                    previous_status, updated_status, status_changed, created_at
+                ) VALUES (?, ?, 'GETEPAY', 'status_check', ?, ?, ?, ?, ?, ?, ?, NOW())
+            `, [
+                orderId, txn.id, txn.status, txn.amount,
+                JSON.stringify({message: 'Transaction already in final state'}),
+                JSON.stringify(requestData), txn.status, txn.status, false
+            ]);
         }
 
         res.status(200).json(new ApiResponse(200, {

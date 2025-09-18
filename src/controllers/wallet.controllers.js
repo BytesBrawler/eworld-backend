@@ -187,6 +187,7 @@ static async requeryRequest(config, request) {
         console.error("Getepay API returned error:", responseWrapper.message);
         return { error: responseWrapper.message || "API returned error status" };
       }
+    //  return responseWrapper;
       
       if (responseWrapper.response) {
         try {
@@ -845,15 +846,15 @@ let originalAmount = amount;
 
   if(user.is_flat_margin === 1){
 
-    amount = amount + user.margin_rates * amount / 100;
+    amount = Number(amount) + Number(user.margin_rates) * Number(amount) / 100;
   }
 
     const adminRes = await db.query("SELECT * FROM users WHERE id = 1");
     const admin = adminRes[0][0];
 
-    if (admin.balance < amount) {
-      return { status: "error", message: "Admin balance is insufficient" };
-    }
+    // if (admin.balance < amount) {
+    //   return { status: "error", message: "Admin balance is insufficient" };
+    // }
 
     // 4. Add balance to user
     const result = await balanceAddition(admin, amount, userId ,originalAmount, {orderId , type: 'online', operationType: 'transfer'});
@@ -1256,10 +1257,28 @@ const getepayStatusCheck = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Missing order_id");
   }
 
+  // Store the original transaction status before processing
+  const [originalTxn] = await db.query("SELECT * FROM transactions WHERE order_id = ? LIMIT 1", [order_id]);
+  const originalStatus = originalTxn[0]?.status;
+
   const result = await verifyAndProcessGetepayTransaction(order_id);
   console.log("Getepay status result:", result);
 
-  res.status(200).json(new ApiResponse(200, {status : result.status, message : result.message}, "Getepay status check completed"));
+  // Get the updated transaction to check if status changed
+  const [updatedTxn] = await db.query("SELECT * FROM transactions WHERE order_id = ? LIMIT 1", [order_id]);
+  const newStatus = updatedTxn[0]?.status;
+  const statusChanged = originalStatus !== newStatus;
+
+  // Return comprehensive response
+  res.status(200).json(new ApiResponse(200, {
+    status: result.status, 
+    message: result.message,
+    original_status: originalStatus,
+    new_status: newStatus,
+    status_changed: statusChanged,
+    transaction_data: updatedTxn[0] || null,
+    gateway_data: result.data || null
+  }, "Getepay status check completed"));
 });
 
 
@@ -1657,7 +1676,7 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
       let originalAmount = amount;
 
       if (user.is_flat_margin === 1) {
-        processedAmount = amount + (user.margin_rates * amount / 100);
+        processedAmount = Number(amount) + (Number(user.margin_rates) * Number(amount) / 100);
       }
 
       const adminRes = await db.query("SELECT * FROM users WHERE id = 1");
@@ -1740,30 +1759,39 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
 const getTransactionStatusLogs = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
 
+  console.log("Fetching status logs for orderId:", orderId);
+
   if (!orderId) {
     throw new ApiError(400, "Order ID is required");
   }
 
   try {
+    // Get all fields from the transaction_status_logs table
     const [logs] = await db.query(`
       SELECT 
-        id, order_id, check_type, gateway_txn_id, gateway_status, 
-        payment_mode, txn_amount, settlement_amount, txn_date,
-        previous_status, updated_status, status_changed, 
-        balance_added, balance_processed, error_message, created_at
+        id, order_id, transaction_id, gateway, check_type, 
+        gateway_txn_id, gateway_status, payment_mode, txn_amount, settlement_amount,
+        bank_ref_no, payment_id, txn_date, settlement_date, error_code, error_message,
+        gateway_response, request_data, previous_status, updated_status, status_changed,
+        balance_added, balance_processed, admin_balance_sufficient, created_at
       FROM transaction_status_logs 
       WHERE order_id = ? 
       ORDER BY created_at DESC
     `, [orderId]);
 
+    console.log(`Found ${logs.length} status logs for order ${orderId}`);
+
+    // Return empty array if no logs found (don't throw error)
     res.status(200).json(new ApiResponse(200, {
       orderId: orderId,
       totalLogs: logs.length,
-      logs: logs
-    }, "Transaction status logs fetched"));
+      logs: logs,
+      hasLogs: logs.length > 0
+    }, logs.length > 0 ? "Transaction status logs fetched successfully" : "No status logs found for this transaction"));
+
   } catch (error) {
     console.error("Get Status Logs Error:", error.message);
-    throw new ApiError(500, "Failed to fetch status logs");
+    throw new ApiError(500, "Failed to fetch status logs: " + error.message);
   }
 });
 
