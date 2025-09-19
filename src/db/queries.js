@@ -180,7 +180,7 @@ async function getUsersbyParentId(role_id, parentId) {
     `SELECT id, person, mobile, company, email, address, balance, parent_id, is_flat_margin, margin_rates, can_withdraw, can_set_margin, can_edit, isWalletAllowed, margin_type, marginAllowed, status
      FROM users
      WHERE parent_id = ? AND role_id = ?
-     ORDER BY person ASC, company ASC`,
+     ORDER BY company ASC, person ASC`,
     [parentId, role_id]
   );
 
@@ -250,7 +250,7 @@ async function getUsersbyParentIdForSuperAdmin(role_id, parentId) {
     params.push(parentId);
   }
 
-  query += " ORDER BY u.person ASC, u.company ASC";
+  query += " ORDER BY  u.company ASC, u.person ASC";
 
   const [users] = await db.query(query, params);
 
@@ -423,9 +423,40 @@ async function addBalanceTransaction(
       balanceType
     ]
   );
+  console.log("Balance transaction added");
+  console.log(balanceType);
+
+  //get keyword with name as transfer
+  const [balanceKeyword] = await db.query("SELECT * FROM keywords WHERE description = ?", [ capitalizeFirst(balanceType) ]);
+
+
+  const [[getUserDetails]] = await db.query("SELECT id, person, mobile,company  FROM users WHERE id = ?", [userId]);
+  const [[getToUserDetails]] = await db.query("SELECT id, person, mobile,company  FROM users WHERE id = ?", [toId]);
+
+//insert itnot recharges for both users
+  //if (balanceKeyword.length > 0) {
+
+    const keywordId = balanceKeyword[0].id;
+
+
+    await db.query(
+      "INSERT INTO recharges (user_id, keyword_id, number,account, amount,deducted_amount,com_retailer,  status, message , txnid, user_prev_balance , user_new_balance, type , type_status) VALUES (?, ?,?, ?,?, ?,?, ?, ?,?,?,?,?,?)",
+      [userId,keywordId ,getUserDetails.mobile,getUserDetails.company, -originalAmount, -amount, -(originalAmount - amount), status, remark , referenceId ,maalikPrevBalance,maalikNewBalance, 'Transfer' ,balanceType   ]
+    );
+
+    await db.query(
+      "INSERT INTO recharges (user_id, keyword_id, number,account, amount, deducted_amount,com_retailer,  status, message , txnid, user_prev_balance , user_new_balance, type , type_status) VALUES (?, ?,?, ?,?, ?,?, ?, ?,?,?,?,?,?)",
+      [toId,keywordId ,getToUserDetails.mobile,getToUserDetails.company, originalAmount, amount, (originalAmount - amount), status, remark , referenceId ,prevBalance,newBalance, 'Transfer' ,balanceType   ]
+    );
+
+    
+  //}
 }
 // Recharge Queries
-
+function capitalizeFirst(word) {
+  if (!word) return ""; // handle empty string
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
 async function initiateRecharge(userId, number, amount, operator) {
   await db.query(
     "INSERT INTO recharges (user_id, number, amount, operator, status) VALUES (?, ?, ?, ?, ?)",
@@ -3275,7 +3306,7 @@ async function getUsers(userRole, role = null, {
   query += ` GROUP BY u.id`;
 
   // Add sorting and pagination - alphabetical order by person name then company
-  query += ` ORDER BY u.person ASC, u.company ASC LIMIT ? OFFSET ?`;
+  query += ` ORDER BY  u.company ASC ,u.person ASC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
 
   // Count total records for pagination

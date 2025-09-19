@@ -487,68 +487,50 @@ function safeParseBalance(value) {
 
 const getStatement = asyncHandler(async (req, res) => {
   const userId = req.user.id;
-  const userRole = req.user.role_id; // Use role_id instead of role
-  
-  console.log('=== Statement API Called ===');
-  console.log('User ID:', userId, 'Role:', userRole);
+  const userRole = req.user.role_id;
   
   const {
     startDate,
     endDate,
-    type = 'all', // 'all', 'recharge', 'balance_transfer'
-    status = 'all', // 'all', 'success', 'pending', 'failed'
+    type = 'all',
+    status = 'all',
     page = 1,
     limit = 50
   } = req.query;
 
-  console.log('Query Params:', { startDate, endDate, type, status, page, limit });
+  console.log('Statement API:', { userId, userRole, startDate, endDate, type, status, page, limit });
 
   try {
-    // Get user details and current balance
-    const [userResult] = await db.query(`
-      SELECT u.balance, u.person, u.mobile, r.role as role_name 
-      FROM users u 
-      LEFT JOIN roles r ON u.role_id = r.id 
-      WHERE u.id = ?
-    `, [userId]);
-    
+    // Get user info
+    const [userResult] = await db.query('SELECT balance, person, mobile FROM users WHERE id = ?', [userId]);
     if (!userResult || userResult.length === 0) {
       throw new ApiError(404, "User not found");
     }
-    
     const user = userResult[0];
-    const currentBalance = parseFloat(user.balance || 0);
-    
-    console.log('User found:', { balance: currentBalance, name: user.person });
 
-    // Build filters
-    let dateCondition = '';
-    let typeCondition = '';
-    let statusCondition = '';
-    let queryParams = [];
+    // Build filter conditions
+    let dateWhere = '';
+    let typeWhere = '';
+    let statusWhere = '';
+    const filterParams = [];
 
     if (startDate && endDate) {
-      dateCondition = `AND DATE(created_at) BETWEEN ? AND ?`;
-      queryParams.push(startDate, endDate);
-    }
-
-    if (type !== 'all') {
-      if (type === 'recharge') {
-        typeCondition = `AND transaction_type = 'recharge'`;
-      } else if (type === 'balance_transfer') {
-        typeCondition = `AND transaction_type = 'balance_transfer'`;
-      }
+      dateWhere = `AND DATE(created_at) BETWEEN ? AND ?`;
+      filterParams.push(startDate, endDate);
     }
 
     if (status !== 'all') {
-      statusCondition = `AND status = ?`;
-      queryParams.push(status);
+      statusWhere = `AND status = ?`;
+      filterParams.push(status);
     }
 
-    // Unified query with consistent field mapping
-    const baseQuery = `
-      SELECT * FROM (
-        -- Recharge transactions with unified structure
+    let rechargeQuery = '';
+    let balanceQuery = '';
+    let unionQuery = '';
+
+    // Build recharge query based on type filter
+    if (type === 'all' || type === 'recharge') {
+      rechargeQuery = `
         SELECT 
           'recharge' as transaction_type,
           r.id as transaction_id,
@@ -557,73 +539,71 @@ const getStatement = asyncHandler(async (req, res) => {
           r.number as mobile_number,
           r.account as account_number,
           r.amount as original_amount,
-          r.deducted_amount as pay_amount,
           r.deducted_amount as final_amount,
-          CASE 
-            WHEN r.user_id = ? THEN r.com_retailer
-            WHEN r.parent_id = ? THEN r.com_parent  
-            WHEN r.superparent_id = ? THEN r.com_superparent
-            ELSE r.com_admin
-          END as commission,
-          r.user_prev_balance as stored_old_balance,
-          r.user_new_balance as stored_new_balance,
-          r.parent_id,
-          r.superparent_id,
+          r.com_retailer,
           r.com_parent,
           r.com_superparent,
           r.com_admin,
+          r.user_prev_balance as old_balance,
+          r.user_new_balance as new_balance,
+          r.parent_id,
+          r.superparent_id,
           r.status,
-          r.message as description,
+          r.message,
           r.txnid,
-          r.reqid as reference_id,
-          CONCAT(COALESCE(k.description, 'Unknown'), ' - ', COALESCE(o.name, 'Unknown')) as service_name,
+          r.reqid,
+          CONCAT(COALESCE(k.description, 'Service'), ' - ', COALESCE(o.name, 'Operator')) as service_name,
           r.created_at,
           r.updated_at
         FROM recharges r
         LEFT JOIN keywords k ON r.keyword_id = k.id
         LEFT JOIN operators o ON k.operator_id = o.id
         WHERE (r.user_id = ? OR r.parent_id = ? OR r.superparent_id = ?)
-        
-        UNION ALL
-        
-        -- Balance transfer transactions with unified structure  
+        ${dateWhere} ${statusWhere}
+      `;
+    }
+
+    // Build balance transfer query based on type filter
+    if (type === 'all' || type === 'balance_transfer') {
+      balanceQuery = `
         SELECT 
           'balance_transfer' as transaction_type,
           bt.id as transaction_id,
           bt.user_id,
           bt.to_id,
           CASE 
-            WHEN bt.user_id = ? THEN u_to.mobile
-            ELSE u_from.mobile
+            WHEN bt.user_id = ? THEN COALESCE(u_to.mobile, 'N/A')
+            ELSE COALESCE(u_from.mobile, 'N/A')
           END as mobile_number,
           NULL as account_number,
-          bt.amount as original_amount,
-          bt.amount as pay_amount,
+          bt.original_amount as original_amount,
           bt.amount as final_amount,
-          0 as commission,
+          0 as com_retailer,
+          0 as com_parent,
+          0 as com_superparent,
+          0 as com_admin,
           CASE 
-            WHEN bt.user_id = ? THEN bt.prev_balance
-            ELSE bt.Maalik_prev_balance  
-          END as stored_old_balance,
+            WHEN bt.user_id = ? THEN bt.Maalik_prev_balance
+            WHEN bt.to_id = ? THEN bt.prev_balance
+            ELSE NULL
+          END as old_balance,
           CASE 
-            WHEN bt.user_id = ? THEN bt.new_balance
-            ELSE bt.Maalik_new_balance
-          END as stored_new_balance,
+            WHEN bt.user_id = ? THEN bt.Maalik_new_balance
+            WHEN bt.to_id = ? THEN bt.new_balance
+            ELSE NULL
+          END as new_balance,
           NULL as parent_id,
           NULL as superparent_id,
-          NULL as com_parent,
-          NULL as com_superparent,
-          NULL as com_admin,
           bt.status,
           CONCAT('Transfer ', 
             CASE 
-              WHEN bt.user_id = ? THEN CONCAT('to ', COALESCE(u_to.person, 'Unknown'), ' (', COALESCE(u_to.mobile, 'N/A'), ')')
-              ELSE CONCAT('from ', COALESCE(u_from.person, 'Unknown'), ' (', COALESCE(u_from.mobile, 'N/A'), ')')
+              WHEN bt.user_id = ? THEN CONCAT('to ', COALESCE(u_to.person, 'Unknown'))
+              ELSE CONCAT('from ', COALESCE(u_from.person, 'Unknown'))
             END,
             CASE WHEN bt.remark IS NOT NULL THEN CONCAT(' - ', bt.remark) ELSE '' END
-          ) as description,
+          ) as message,
           CONCAT('TXN', bt.id) as txnid,
-          bt.id as reference_id,
+          bt.id as reqid,
           'Balance Transfer' as service_name,
           bt.created_at,
           bt.updated_at
@@ -631,227 +611,191 @@ const getStatement = asyncHandler(async (req, res) => {
         LEFT JOIN users u_to ON bt.to_id = u_to.id
         LEFT JOIN users u_from ON bt.user_id = u_from.id
         WHERE (bt.user_id = ? OR bt.to_id = ?)
-      ) as unified_transactions
-      WHERE 1=1 ${dateCondition} ${typeCondition} ${statusCondition}
-      ORDER BY created_at DESC
-    `;
+        ${dateWhere} ${statusWhere}
+      `;
+    }
 
-    // Parameters for the query (6 for recharge + 6 for balance_transfer + filter params)
-    const queryParameters = [
-      userId, userId, userId, // for recharge commission logic
-      userId, userId, userId, // for recharge user filter
-      userId, userId, userId, userId, // for balance transfer logic  
-      userId, userId, // for balance transfer user filter
-      ...queryParams // date, status filters
-    ];
+    // Combine queries with UNION if both types are needed
+    if (rechargeQuery && balanceQuery) {
+      unionQuery = `(${rechargeQuery}) UNION ALL (${balanceQuery}) ORDER BY created_at DESC`;
+    } else if (rechargeQuery) {
+      unionQuery = `${rechargeQuery} ORDER BY created_at DESC`;
+    } else if (balanceQuery) {
+      unionQuery = `${balanceQuery} ORDER BY created_at DESC`;
+    } else {
+      throw new ApiError(400, "Invalid transaction type");
+    }
 
-    console.log('Query parameters:', queryParameters);
+    // Build parameters array
+    let queryParams = [];
+    
+    // Add parameters for recharge query
+    if (rechargeQuery) {
+      queryParams.push(userId, userId, userId); // user filter
+      queryParams.push(...filterParams); // date and status filters
+    }
+    
+    // Add parameters for balance transfer query  
+    if (balanceQuery) {
+      queryParams.push(userId); // mobile number logic
+      queryParams.push(userId, userId); // old balance logic
+      queryParams.push(userId, userId); // new balance logic
+      queryParams.push(userId); // message logic
+      queryParams.push(userId, userId); // user filter
+      queryParams.push(...filterParams); // date and status filters
+    }
 
-    // Get total count first for pagination
-    const countQuery = `SELECT COUNT(*) as total FROM (${baseQuery}) as counted`;
-    const [countResult] = await db.query(countQuery, queryParameters);
+    // Get total count for pagination
+    const countQuery = `SELECT COUNT(*) as total FROM (${unionQuery}) as counted`;
+    const [countResult] = await db.query(countQuery, queryParams);
     const totalRecords = countResult[0]?.total || 0;
 
-    console.log('Total records found:', totalRecords);
-
-    // Get paginated transactions
+    // Get paginated results
     const offset = (page - 1) * limit;
-    const paginatedQuery = `${baseQuery} LIMIT ? OFFSET ?`;
-    const [transactions] = await db.query(paginatedQuery, [...queryParameters, parseInt(limit), offset]);
+    const paginatedQuery = `${unionQuery} LIMIT ? OFFSET ?`;
+    const [transactions] = await db.query(paginatedQuery, [...queryParams, parseInt(limit), offset]);
 
-    console.log(`Retrieved ${transactions.length} transactions for page ${page}`);
+    console.log(`Found ${transactions.length} transactions out of ${totalRecords} total`);
 
-    // Calculate running balances with corrected logic
-    const transactionsWithBalances = calculateRunningBalancesCorrect(transactions, userRole, userId, currentBalance);
+    // Process transactions using STORED balances directly
+    const processedTransactions = transactions.map(txn => {
+      // Use the ACTUAL stored balances from database - NO CALCULATION
+      const previousBalance = parseFloat(txn.old_balance || 0);
+      const newBalance = parseFloat(txn.new_balance || 0);
+      
+      // Calculate transaction effect and commission based on your logic
+      let transactionEffect = 0;
+      let commission = 0;
+
+      if (txn.transaction_type === 'recharge') {
+        if (userRole === 5) { // Retailer
+          if (txn.user_id === userId) {
+            transactionEffect = -parseFloat(txn.final_amount || 0);
+            commission = parseFloat(txn.com_retailer || 0);
+          }
+        } else { // Distributor, Master, Admin, Super Admin  
+          if (txn.user_id === userId) {
+            // Their own recharge
+            transactionEffect = -parseFloat(txn.final_amount || 0);
+          } else if (txn.parent_id === userId) {
+            // Commission from direct child
+            commission = parseFloat(txn.com_parent || 0);
+            transactionEffect = commission;
+          } else if (txn.superparent_id === userId) {
+            // Commission from grandchild
+            commission = parseFloat(txn.com_superparent || 0);
+            transactionEffect = commission;
+          } else {
+            // Admin commission
+            commission = parseFloat(txn.com_admin || 0);
+            transactionEffect = commission;
+          }
+        }
+      } else if (txn.transaction_type === 'balance_transfer') {
+        if (txn.to_id === userId) {
+          // Receiving transfer
+          transactionEffect = parseFloat(txn.final_amount || 0);
+        } else if (txn.user_id === userId) {
+          // Sending transfer
+          transactionEffect = -parseFloat(txn.final_amount || 0);
+        }
+      }
+
+      return {
+        transaction_type: txn.transaction_type || '',
+        transaction_id: txn.transaction_id?.toString() || '',
+        account_number: txn.account_number || null,
+        mobile_number: txn.mobile_number || null,
+        original_amount: parseFloat(txn.original_amount || 0),
+        amount:userRole < 5? parseFloat(txn.final_amount || 0) : 0,
+        commission: commission,
+        previous_balance: previousBalance,
+        new_balance: newBalance,
+        transaction_effect: parseFloat(transactionEffect.toFixed(2)),
+        transfer_details: {
+          to_user: txn.message || '',
+          to_mobile: txn.mobile_number || ''
+        },
+        status: txn.status || '',
+        message: txn.message || '',
+        txnid: txn.txnid || '',
+        reqid: txn.reqid?.toString() || '',
+        service_details: {
+          keyword_name: txn.service_name || '',
+          operator_name: txn.service_name || '',
+          operator_image: null,
+          keyword_id: null,
+          operator_id: null
+        },
+        display_type: txn.transaction_type || '',
+        timestamps: {
+          created_at: txn.created_at,
+          updated_at: txn.updated_at
+        }
+      };
+    });
 
     // Calculate summary
     const summary = {
       total_records: totalRecords,
-      total_credits: 0,
-      total_debits: 0,
-      net_amount: 0,
-      recharge_count: 0,
-      recharge_amount: 0,
-      transfer_count: 0,
-      transfer_amount: 0,
-      commission_earned: 0,
-      opening_balance: transactionsWithBalances.length > 0 ? transactionsWithBalances[transactionsWithBalances.length - 1]?.calculated_previous_balance || 0 : currentBalance,
-      closing_balance: transactionsWithBalances.length > 0 ? transactionsWithBalances[0]?.calculated_new_balance || 0 : currentBalance
+      successful_recharges: processedTransactions.filter(t => 
+        t.transaction_type === 'recharge' && t.status === 'success').length,
+      pending_recharges: processedTransactions.filter(t => 
+        t.transaction_type === 'recharge' && t.status === 'pending').length,
+      failed_recharges: processedTransactions.filter(t => 
+        t.transaction_type === 'recharge' && (t.status === 'failed' || t.status === 'refunded')).length,
+      successful_transfers: processedTransactions.filter(t => 
+        t.transaction_type === 'balance_transfer' && t.status === 'success').length,
+      total_recharge_amount: processedTransactions
+        .filter(t => t.transaction_type === 'recharge' && t.status === 'success')
+        .reduce((sum, t) => sum + t.amount, 0),
+      total_transfer_amount: processedTransactions
+        .filter(t => t.transaction_type === 'balance_transfer' && t.status === 'success')
+        .reduce((sum, t) => sum + t.amount, 0),
+      total_commission_earned: processedTransactions
+        .reduce((sum, t) => sum + t.commission, 0)
     };
-
-    transactionsWithBalances.forEach(txn => {
-      const effect = txn.transaction_effect || 0;
-      
-      if (effect > 0) {
-        summary.total_credits += effect;
-      } else {
-        summary.total_debits += Math.abs(effect);
-      }
-
-      if (txn.transaction_type === 'recharge') {
-        summary.recharge_count++;
-        summary.recharge_amount += Math.abs(txn.final_amount || 0);
-        summary.commission_earned += Math.abs(txn.commission || 0);
-      } else if (txn.transaction_type === 'balance_transfer') {
-        summary.transfer_count++;
-        summary.transfer_amount += Math.abs(txn.final_amount || 0);
-      }
-    });
-
-    summary.net_amount = summary.total_credits - summary.total_debits;
 
     const response = {
-      success: true,
-      data: {
-        user: {
-          id: userId,
-          name: user.person || '',
-          mobile: user.mobile || '',
-          role: user.role_name || '',
-          current_balance: currentBalance
-        },
-        transactions: transactionsWithBalances,
-        summary,
-        pagination: {
-          current_page: parseInt(page),
-          per_page: parseInt(limit),
-          total_records: totalRecords,
-          total_pages: Math.ceil(totalRecords / limit),
-          has_next: page * limit < totalRecords,
-          has_prev: page > 1
-        },
-        filters: {
-          start_date: startDate || null,
-          end_date: endDate || null,
-          type,
-          status
-        }
-      }
+      user: {
+        id: userId,
+        name: user.person || '',
+        mobile: user.mobile || '',
+        role: userRole,
+        current_balance: parseFloat(user.balance || 0)
+      },
+      summary,
+      pagination: {
+        current_page: parseInt(page),
+        total_pages: Math.ceil(totalRecords / limit),
+        total_records: totalRecords,
+        per_page: parseInt(limit)
+      },
+      filters: {
+        start_date: startDate || null,
+        end_date: endDate || null,
+        type,
+        status
+      },
+      transactions: processedTransactions
     };
 
-    console.log('=== Statement API Response Ready ===');
-    console.log(`Returning ${transactionsWithBalances.length} transactions`);
+    console.log('API Success:', { 
+      user: response.user.name, 
+      transactions: response.transactions.length,
+      totalRecords 
+    });
 
-    return res.status(200).json(response);
+    return res.status(200).json(new ApiResponse(200, response, "Statement fetched successfully"));
 
   } catch (error) {
     console.error('Statement API Error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch statement',
-      error: error.message
-    });
+    throw new ApiError(500, `Failed to fetch statement: ${error.message}`);
   }
 });
 
 // Corrected balance calculation function following exact user specifications
-function calculateRunningBalancesCorrect(transactions, userRole, userId, startingBalance) {
-  if (!transactions || transactions.length === 0) {
-    console.log('No transactions to process');
-    return [];
-  }
-
-  console.log(`=== Calculating Running Balances ===`);
-  console.log(`User: ${userId}, Role: ${userRole}, Starting Balance: ${startingBalance}`);
-  console.log(`Total Transactions: ${transactions.length}`);
-
-  // Sort chronologically (oldest first) for calculation
-  const sortedTransactions = [...transactions].sort((a, b) => 
-    new Date(a.created_at) - new Date(b.created_at)
-  );
-
-  let runningBalance = startingBalance;
-
-  // Try to get better starting balance from first transaction
-  if (sortedTransactions.length > 0) {
-    const firstTxn = sortedTransactions[0];
-    const storedBalance = parseFloat(firstTxn.stored_old_balance || 0);
-    if (storedBalance > 0) {
-      runningBalance = storedBalance;
-      console.log(`Using stored balance as starting point: ${runningBalance}`);
-    }
-  }
-
-  const processedTransactions = sortedTransactions.map((txn, index) => {
-    const previousBalance = runningBalance;
-    let transactionEffect = 0;
-
-    console.log(`\n--- Transaction ${index + 1} ---`);
-    console.log(`Type: ${txn.transaction_type}, User: ${txn.user_id}, Amount: ${txn.final_amount}`);
-    console.log(`Previous Balance: ${previousBalance}`);
-
-    // Apply your exact logic specifications
-    if (txn.transaction_type === 'recharge') {
-      if (userRole === 5) { // Retailer
-        if (txn.user_id === userId) {
-          // Retailer's own recharge: old balance - deducted amount = new balance
-          transactionEffect = -Math.abs(parseFloat(txn.pay_amount || txn.final_amount || 0));
-          console.log(`Retailer own recharge: -${Math.abs(parseFloat(txn.pay_amount || txn.final_amount || 0))}`);
-        }
-        // Note: Retailers don't get commission from others' recharges in your logic
-      } else { // Distributor, Master, Admin, Super Admin
-        if (txn.user_id === userId) {
-          // Their own recharge: old balance - deducted amount = new balance
-          transactionEffect = -Math.abs(parseFloat(txn.pay_amount || txn.final_amount || 0));
-          console.log(`Own recharge: -${Math.abs(parseFloat(txn.pay_amount || txn.final_amount || 0))}`);
-        } else {
-          // Commission based on role and relationship
-          let commission = 0;
-          
-          if (txn.parent_id === userId) {
-            // User is parent of the recharge user
-            commission = parseFloat(txn.com_parent || 0);
-            console.log(`Parent commission: ${commission}`);
-          } else if (txn.superparent_id === userId) {
-            // User is superparent of the recharge user  
-            commission = parseFloat(txn.com_superparent || 0);
-            console.log(`Superparent commission: ${commission}`);
-          } else if (userRole === 1 || userRole === 2) { // Admin or Super Admin
-            commission = parseFloat(txn.com_admin || 0);
-            console.log(`Admin commission: ${commission}`);
-          }
-          
-          transactionEffect = Math.abs(commission);
-        }
-      }
-    } else if (txn.transaction_type === 'balance_transfer') {
-      // For all roles (distributor, master, admins, super admin)
-      if (txn.to_id === userId) {
-        // Receiving transfer: old balance + amount = new balance
-        transactionEffect = Math.abs(parseFloat(txn.final_amount || 0));
-        console.log(`Received transfer: +${Math.abs(parseFloat(txn.final_amount || 0))}`);
-      } else if (txn.user_id === userId) {
-        // Sending transfer: old balance - amount = new balance
-        transactionEffect = -Math.abs(parseFloat(txn.final_amount || 0));
-        console.log(`Sent transfer: -${Math.abs(parseFloat(txn.final_amount || 0))}`);
-      }
-    }
-
-    // Update running balance
-    runningBalance = parseFloat((previousBalance + transactionEffect).toFixed(2));
-
-    console.log(`Transaction Effect: ${transactionEffect}`);
-    console.log(`New Balance: ${runningBalance}`);
-
-    return {
-      ...txn,
-      calculated_previous_balance: parseFloat(previousBalance.toFixed(2)),
-      calculated_new_balance: runningBalance,
-      transaction_effect: parseFloat(transactionEffect.toFixed(2)),
-      // Clean up amounts
-      original_amount: parseFloat(txn.original_amount || 0),
-      pay_amount: parseFloat(txn.pay_amount || 0),
-      final_amount: parseFloat(txn.final_amount || 0),
-      commission: parseFloat(txn.commission || 0)
-    };
-  });
-
-  console.log(`=== Balance Calculation Complete ===`);
-  console.log(`Final Balance: ${runningBalance}`);
-
-  // Return in display order (newest first)
-  return processedTransactions.reverse();
-}
+// Removed calculateRunningBalancesCorrect function - now using stored database balances directly
 
 
 

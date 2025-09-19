@@ -38,9 +38,9 @@ const getSearch = asyncHandler(async (req, res) => {
       p.company AS parent_shop
     FROM users u
     LEFT JOIN users p ON u.parent_id = p.id
-    WHERE u.mobile LIKE ?
+    WHERE u.mobile LIKE ? OR u.person LIKE ?
   `;
-  const params = [`%${search}%`];
+  const params = [`%${search}%`, `%${search}%`];
   console.log("SQL Query:", sqlQuery);
   console.log("Parameters:", params);
   
@@ -66,8 +66,8 @@ const getSearch = asyncHandler(async (req, res) => {
   }
   
   // Log the exact SQL query that would be executed
-  const sqlQuery = "SELECT id, mobile, role_id, person, company , balance FROM users WHERE parent_id = ? AND mobile LIKE ?";
-  const params = [req.user.id, `%${search}%`];
+  const sqlQuery = "SELECT id, mobile, role_id, person, company , balance FROM users WHERE parent_id = ? AND (mobile LIKE ? OR person LIKE ?)";
+  const params = [req.user.id, `%${search}%`, `%${search}%`];
   console.log("SQL Query:", sqlQuery);
   console.log("Parameters:", params);
   

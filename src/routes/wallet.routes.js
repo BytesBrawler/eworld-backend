@@ -24,6 +24,7 @@ router.route("/getTransactions").get(verifyAuth ,controller.getTransactions);
 // Getepay routes
 router.route("/getepay/generateOrder").post(verifyAuth, controller.getepayGenerateOrder);
 router.route("/getepay/callback").post(controller.getepayCallback);
+router.route("/getepay/callback").get(controller.getepayCallback);
 router.route("/getepay/statusCheck").post(verifyAuth, controller.getepayStatusCheck);
 router.route("/getepay/requery").post(verifyAuth, controller.getepayRequery);
 router.route("/getepay/refund").post(verifyAuth, controller.getepayRefund);

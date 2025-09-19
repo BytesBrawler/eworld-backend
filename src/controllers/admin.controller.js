@@ -644,6 +644,31 @@ if(lastgig !== null && lastgig !== undefined){
           'refund' // Recharge refund is 'refund' not 'credit'
         ]
       );
+
+
+  //get keyword with name as transfer
+  const [balanceKeyword] = await db.query("SELECT * FROM keywords WHERE description = ?", [ "Refund" ]);
+
+
+  const [[getUserDetails]] = await db.query("SELECT id, person, mobile,company  FROM users WHERE id = ?", [req.user.id]);
+  const [[getToUserDetails]] = await db.query("SELECT id, person, mobile,company  FROM users WHERE id = ?", [recharge.user_id]);
+
+//insert itnot recharges for both users
+  //if (balanceKeyword.length > 0) {
+
+    const balancekeywordId = balanceKeyword[0].id;
+
+
+    await db.query(
+      "INSERT INTO recharges (user_id, keyword_id, number,account, amount,deducted_amount,com_retailer,  status, message , txnid, user_prev_balance , user_new_balance, type , type_status) VALUES (?, ?,?, ?,?, ?,?, ?, ?,?,?,?,?,?)",
+      [req.user.id,balancekeywordId ,getUserDetails.mobile,getUserDetails.company, -recharge.deducted_amount, -recharge.deducted_amount, 0, 'success', `Recharge Amount refunded for ${recharge.number}(${keywordDetails.description} ) at ${recharge.created_at}` , recharge.id ,req.user.balance, req.user.balance - recharge.deducted_amount , 'Transfer' , "refund"  ]
+    );
+
+    await db.query(
+      "INSERT INTO recharges (user_id, keyword_id, number,account, amount, deducted_amount,com_retailer,  status, message , txnid, user_prev_balance , user_new_balance, type , type_status) VALUES (?, ?,?, ?,?, ?,?, ?, ?,?,?,?,?,?)",
+      [recharge.user_id,balancekeywordId  ,getToUserDetails.mobile,getToUserDetails.company, recharge.deducted_amount, recharge.deducted_amount, 0,  'success', `Recharge Amount refunded for ${recharge.number}(${keywordDetails.description} ) at ${recharge.created_at}` , recharge.id ,  user.balance,
+          (parseFloat(user.balance) + parseFloat(recharge.deducted_amount)), 'Transfer' ,"refund"  ]
+    );
     }
 
 

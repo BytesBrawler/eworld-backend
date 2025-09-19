@@ -13,7 +13,7 @@ const axios = require("axios");
 function getBalanceType(fromUser, toUser, transactionType, operationType = null) {
   // If it's an online payment, it's always a transfer
   if (transactionType === 'online') {
-    return 'transfer';
+    return 'credit';
   }
 
   // Check for refund operations first (recharge failures, auto refunds)
@@ -378,6 +378,9 @@ async function balanceAddition(parent_user, amount, userId,originalAmount, optio
     remark,
     balanceType
   );
+
+
+
   return { status, balanceBeforeAddition, balanceAfterAddition, balanceBeforeDeduction, balanceAfterDeduction };
 }
 
@@ -1116,7 +1119,6 @@ const getBalReport = asyncHandler(async (req, res) => {
 });
 
 // Getepay Controller Methods
-
 const getepayGenerateOrder = asyncHandler(async (req, res) => {
   const { amount } = req.body;
   console.log("Getepay Amount:", amount);
@@ -1126,9 +1128,21 @@ const getepayGenerateOrder = asyncHandler(async (req, res) => {
   }
 
   const userId = req.user.id;
-  const userMobile = req.user.mobile || "9667027786";
-  const userEmail = req.user.email || "imranchopdar13@gmail.com";
-  const companyName = "Eworld";
+  // const userMobile = req.user.mobile || "9667027786";
+  // const userEmail = req.user.email || "imranchopdar13@gmail.com";
+  // const companyName = "Eworld";
+
+  //get user details
+  const user = await query.users({id:userId});
+  // const user = await query.findUserByMobile(mobile);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  const userMobile = user.mobile || req.userId;
+  const companyName = user.company || "";
+  const personName = user.person || "Eworld User";
 
   // Step 1: Insert transaction with status 'initiated' to get the table ID
   const [insertResult] = await db.query(
@@ -1155,8 +1169,8 @@ const getepayGenerateOrder = asyncHandler(async (req, res) => {
     transactionDate: new Date().toISOString(),
     terminalId: config.terminalId,
     udf1: userMobile,
-    udf2: userEmail,
-    udf3: companyName,
+    udf2: companyName,
+    udf3: personName,
     udf4: "",
     udf5: "",
     udf6: "",
@@ -1165,7 +1179,7 @@ const getepayGenerateOrder = asyncHandler(async (req, res) => {
     udf9: "",
     udf10: "",
     ru: "",
-    callbackUrl: `${process.env.BASE_URL || 'https://eworldrc.com'}/api/v1/wallet/getepay/callback`,
+    callbackUrl: `${process.env.BASE_URL || 'https://eworldrc.in'}/api/v1/wallet/getepay/callback`,
     currency: "INR",
     paymentMode: "UPI",
     bankId: "",
@@ -1223,6 +1237,8 @@ const getepayGenerateOrder = asyncHandler(async (req, res) => {
 
 const getepayCallback = asyncHandler(async (req, res) => {
   console.log("Getepay Callback received:", req.body);
+  console.log("Getepay Callback received:", req.query);
+  console.log("Getepay Callback received:", req);
   const { response } = req.body;
 
   if (!response) {
@@ -1595,7 +1611,7 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
 
   if (transaction.status === "success") {
     // Log the status check even if already processed
-    await logStatusCheck(orderId, transaction.id, checkType, callbackData || {}, previousStatus, 'success', true, transaction.amount);
+   // await logStatusCheck(orderId, transaction.id, checkType, callbackData || {}, previousStatus, 'success', true, transaction.amount);
     return { status: "success", message: "Transaction already processed" };
   }
 
@@ -1671,6 +1687,16 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
       const amount = transaction.amount;
       const userId = transaction.user_id;
       const user = await query.users({id: userId});
+
+       const [rows2] = await db.query("SELECT * FROM transactions WHERE order_id = ? LIMIT 1", [orderId]);
+  const transaction2 = rows2[0];
+
+   if (transaction2.status === "success") {
+    // Log the status check even if already processed
+   // await logStatusCheck(orderId, transaction.id, checkType, callbackData || {}, previousStatus, 'success', true, transaction.amount);
+    return { status: "success", message: "Transaction already processed" };
+  }
+
       
       let processedAmount = amount;
       let originalAmount = amount;
@@ -1692,7 +1718,7 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
       const result = await balanceAddition(admin, processedAmount, userId, originalAmount, {
         orderId, 
         type: 'online',
-        operationType: 'transfer'
+        operationType: 'credit'
       });
 
       if (result.status !== "success") {
@@ -1710,16 +1736,25 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
         ["success", orderId]
       );
 
+      const userName = user.person || "Eworld User";
+      const userShop = user.company || "";
+      const userMobile = user.mobile || "";
+
       // Send notification
       messageUtils.sendMessageToUser(
         userId,
-        `Dear eworld User, Balance of ${processedAmount} has been added to your account via Getepay`,
+        `Dear ${userName}(${userShop}), Balance of ${processedAmount} has been added to your account ${userMobile} with refrenceid: ${transaction.reference_id}. Thank you for using Eworld!`,
+        "number"
+      );
+      messageUtils.sendMessageToUser(
+        1,
+        `Dear Admin, Balance of ${processedAmount} has been added to your  ${userName}(${userShop})-${userMobile} with refrenceid: ${transaction.reference_id}. Thank you for using Eworld!`,
         "number"
       );
 
       messageUtils.sendMessageToUser(
         userId,
-        `Your Eworld wallet balance has been credited with ${processedAmount} via Getepay`
+        `Your Eworld wallet balance has been credited with ${processedAmount} `
       );
 
       return { status: "success", message: "Balance added successfully via Getepay", data: statusData };

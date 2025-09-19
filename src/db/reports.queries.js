@@ -165,190 +165,73 @@ async function getPurchasesReports(userId, options) {
 
   const offset = (page - 1) * limit;
   let query = `
-  SELECT
-    bt.amount,
-    bt.status,
-    bt.transaction_type,
-    bt.created_at,
-    CASE 
-      WHEN bt.reference_id IS NULL THEN bt.id 
-      ELSE bt.reference_id 
-    END AS reference_id,
-    bt.prev_balance,
-    bt.new_balance,
-    bt.remark,
-    bt.balance_type
-  FROM bal_transactions AS bt
-  WHERE bt.to_id = ?
-`;
+    SELECT
+      bt.amount,
+      bt.status,
+      bt.transaction_type,
+      bt.created_at,
+      CASE 
+        WHEN bt.reference_id IS NULL THEN bt.id 
+        ELSE bt.reference_id 
+      END AS reference_id,
+      bt.prev_balance,
+      bt.new_balance,
+      bt.remark,
+      bt.balance_type
+    FROM bal_transactions AS bt
+    WHERE bt.to_id = ?
+  `;
 
-const params = [userId];
+  const params = [userId];
 
-if (startDate && endDate) {
-  query += ` AND bt.created_at BETWEEN ? AND ?`;
-  params.push(startDate, endDate);
-}
-if (minAmount) {
-  query += ` AND bt.amount >= ?`;
-  params.push(minAmount);
-}
-if (maxAmount) {
-  query += ` AND bt.amount <= ?`;
-  params.push(maxAmount);
-}
-if (status) {
-  query += ` AND bt.status = ?`;
-  params.push(status);
-}
-if (transactionType) {
-  query += ` AND bt.transaction_type = ?`;
-  params.push(transactionType);
-}
+  if (startDate && endDate) {
+    query += ` AND bt.created_at BETWEEN ? AND ?`;
+    params.push(startDate, endDate);
+  }
+  if (minAmount) {
+    query += ` AND bt.amount >= ?`;
+    params.push(minAmount);
+  }
+  if (maxAmount) {
+    query += ` AND bt.amount <= ?`;
+    params.push(maxAmount);
+  }
+  if (status) {
+    query += ` AND bt.status = ?`;
+    params.push(status);
+  }
+  if (transactionType) {
+    query += ` AND bt.transaction_type = ?`;
+    params.push(transactionType);
+  }
 
-// Save where clause for count
-const whereClause = query.split("WHERE")[1];
+  // Save where clause for count
+  const whereClause = query.split("WHERE")[1];
 
-// Add second part from 'transactions' table
-let secondQuery = `
-  SELECT
-    t.amount,
-    t.status,
-    'online' AS transaction_type,
-    t.created_at,
-    t.reference_id,
-    NULL AS prev_balance,
-    NULL AS new_balance,
-    t.payment_mode AS remark,
-    NULL AS balance_type
-  FROM transactions AS t
-  WHERE t.user_id = ?
-`;
-const secondParams = [userId];
+  // Add pagination to the main query
+  query += ` ORDER BY bt.created_at DESC LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
 
-if (startDate && endDate) {
-  secondQuery += ` AND t.created_at BETWEEN ? AND ?`;
-  secondParams.push(startDate, endDate);
-}
-if (minAmount) {
-  secondQuery += ` AND t.amount >= ?`;
-  secondParams.push(minAmount);
-}
-if (maxAmount) {
-  secondQuery += ` AND t.amount <= ?`;
-  secondParams.push(maxAmount);
-}
-if (status) {
-  secondQuery += ` AND t.status = ?`;
-  secondParams.push(status);
-}
+  // Build a proper count query
+  const countQuery = `
+    SELECT COUNT(*) as total 
+    FROM bal_transactions as bt
+    WHERE ${whereClause}
+  `;
 
-// Combine both queries using UNION ALL
-let finalQuery = `
-  (${query})
-  UNION ALL
-  (${secondQuery})
-  ORDER BY created_at DESC
-  LIMIT ? OFFSET ?
-`;
+  // Execute queries
+  const [rows] = await db.query(query, params);
+  const [countResult] = await db.query(countQuery, params.slice(0, -2));
 
-const finalParams = [...params, ...secondParams, limit, offset];
-
-// Count query (both tables)
-const countQuery = `
-  SELECT COUNT(*) AS total FROM (
-    (${query})
-    UNION ALL
-    (${secondQuery})
-  ) AS combined
-`;
-const countParams = [...params, ...secondParams];
-
-// Execute queries
-const [rows] = await db.query(finalQuery, finalParams);
-const [countResult] = await db.query(countQuery, countParams);
-
-return {
-  transactions: rows,
-  pagination: {
-    page,
-    limit,
-    total: countResult[0].total,
-    totalPages: Math.ceil(countResult[0].total / limit),
-  },
-};
-
-
-  // let query = `
-  //     SELECT
-  //       bt.amount,
-  //       bt.status,
-  //       bt.transaction_type,
-  //       bt.created_at,
-  //       bt.reference_id,
-  //       bt.prev_balance,
-  //       bt.new_balance,
-  //       bt.remark
-  //     from bal_transactions as bt
-  //     WHERE bt.to_id = ?
-  //   `;
-
-  // const params = [userId];
-
-  // console.log("userId", userId);
-
-  // if (startDate && endDate) {
-  //   query += ` AND bt.created_at BETWEEN ? AND ?`;
-  //   params.push(startDate, endDate);
-  // }
-
-  // if (minAmount) {
-  //   query += ` AND bt.amount >= ?`;
-  //   params.push(minAmount);
-  // }
-
-  // if (maxAmount) {
-  //   query += ` AND bt.amount <= ?`;
-  //   params.push(maxAmount);
-  // }
-
-  // if (status) {
-  //   query += ` AND bt.status = ?`;
-  //   params.push(status);
-  // }
-
-  // if (transactionType) {
-  //   query += ` AND bt.transaction_type = ?`;
-  //   params.push(transactionType);
-  // }
-
-  // // Create a copy of the WHERE clause for the count query
-  // const whereClause = query.split("WHERE")[1];
-
-  // // Add pagination to the main query
-  // query += ` ORDER BY bt.created_at DESC LIMIT ? OFFSET ?`;
-  // params.push(limit, offset);
-
-  // // Build a proper count query
-  // const countQuery = `
-  //     SELECT COUNT(*) as total 
-  //     FROM bal_transactions as bt
-  //     WHERE ${whereClause}
-  //   `;
-
-  // // Execute queries
-  // const [rows] = await db.query(query, params);
-  // const [countResult] = await db.query(countQuery, params.slice(0, -2));
-  // console.log("count result", countResult);
-
-  // return {
-  //   transactions: rows,
-  //   pagination: {
-  //     page,
-  //     limit,
-  //     total: countResult[0].total,
-  //     totalPages: Math.ceil(countResult[0].total / limit)
-  //   }
-  // };
+  return {
+    transactions: rows,
+    pagination: {
+      page,
+      limit,
+      total: countResult[0].total,
+      totalPages: Math.ceil(countResult[0].total / limit)
+    }
+  };
 }
 
 async function getPurchasesReportsOnline  ({
@@ -592,35 +475,23 @@ async function getPurchasesReportsOnline  ({
 async function getRecents(userId,role) {
     console.log("user id", userId);
   const queryRetailer = `
-    (SELECT 
-      r.number as transaction_id,
+    SELECT 
+      r.account as transaction_id,
       r.created_at as transaction_date,
       r.amount,
       r.status,
       r.reqid as details,
       k.description as operator_name,
-      'recharge' as transaction_type,
-      NULL as balance_type
+      r.type as transaction_type,
+      o.logo as operator_logo,
+      r.type_status as balance_type
     FROM recharges as r
     LEFT JOIN keywords as k ON r.keyword_id = k.id
-    WHERE r.user_id = ?)
-    
-    UNION ALL
-    
-    (SELECT
-      bt.reference_id as transaction_id,
-      bt.created_at as transaction_date,
-      bt.amount,
-      bt.status,
-      bt.remark as details,
-      NULL as operator_name,
-      'balance' as transaction_type,
-      bt.balance_type
-    FROM bal_transactions as bt
-    WHERE bt.to_id = ?)
-  
+    LEFT JOIN operators as o ON k.operator_id = o.id
+    WHERE r.user_id = ?
     ORDER BY transaction_date DESC
     LIMIT ?
+  
   `;
 
   const query = `
@@ -654,13 +525,78 @@ async function getRecents(userId,role) {
     ORDER BY transaction_date DESC
     LIMIT ?
   `;
+  // const queryRetailer = `
+  //   (SELECT 
+  //     r.number as transaction_id,
+  //     r.created_at as transaction_date,
+  //     r.amount,
+  //     r.status,
+  //     r.reqid as details,
+  //     k.description as operator_name,
+  //     'recharge' as transaction_type,
+  //     NULL as balance_type
+  //   FROM recharges as r
+  //   LEFT JOIN keywords as k ON r.keyword_id = k.id
+  //   WHERE r.user_id = ?)
+    
+  //   UNION ALL
+    
+  //   (SELECT
+  //     bt.reference_id as transaction_id,
+  //     bt.created_at as transaction_date,
+  //     bt.amount,
+  //     bt.status,
+  //     bt.remark as details,
+  //     NULL as operator_name,
+  //     'balance' as transaction_type,
+  //     bt.balance_type
+  //   FROM bal_transactions as bt
+  //   WHERE bt.to_id = ?)
+  
+  //   ORDER BY transaction_date DESC
+  //   LIMIT ?
+  // `;
 
-  const params = [userId, userId, 5];
+  // const query = `
+  //   (SELECT 
+  //     r.reference_id as transaction_id,
+  //     r.created_at as transaction_date,
+  //     r.amount,
+  //     r.status,
+  //     r.remark as details,
+  //     'purchase' as transaction_type,
+  //     NULL as operator_name,
+  //     r.balance_type
+  //   FROM bal_transactions as r
+  //   WHERE r.to_id = ?)
+    
+  //   UNION ALL
+    
+  //   (SELECT
+  //     bt.reference_id as transaction_id,
+  //     bt.created_at as transaction_date,
+  //     bt.amount,
+  //     bt.status,
+  //     bt.remark as details,
+  //     u.company as transaction_type,
+  //     u.mobile as operator_name,
+  //     bt.balance_type
+  //   FROM bal_transactions as bt
+  //   LEFT JOIN users as u ON bt.to_id = u.id
+  //   WHERE bt.user_id = ?)
+    
+  //   ORDER BY transaction_date DESC
+  //   LIMIT ?
+  // `;
+
+  let params = [userId,  5];
   if(role == 5){
     const [recents] = await db.query(queryRetailer, params);
     console.log(recents);
     return recents;
   }
+
+   params = [userId, userId, 5];
 
   const [recents] = await db.query(query, params);
   console.log(recents);
@@ -767,7 +703,7 @@ async function getEarnings(userId, role, options = {}) {
         JOIN
           users u ON r.user_id = u.id
         WHERE 
-          r.parent_id = ?
+          (r.parent_id = ? or r.user_id = ?)
       `;
       
       countQuery = `
@@ -782,10 +718,11 @@ async function getEarnings(userId, role, options = {}) {
         JOIN
           users u ON r.user_id = u.id
         WHERE 
-         r.parent_id = ?
+         (r.parent_id = ? or r.user_id = ?)
       `;
 
       // whereConditions.push('r.parent_id = ?');
+params.push(userId);
 params.push(userId);
 
       
@@ -829,7 +766,7 @@ params.push(userId);
         LEFT JOIN
           users p ON r.parent_id = p.id
         WHERE 
-          (r.superparent_id = ? OR r.parent_id = ?)
+          (r.superparent_id = ? OR r.parent_id = ? or r.user_id = ?)
       `;
       
       countQuery = `
@@ -846,11 +783,11 @@ params.push(userId);
         LEFT JOIN
           users p ON r.parent_id = p.id
         WHERE 
-          (r.superparent_id = ? OR r.parent_id = ?)
+          (r.superparent_id = ? OR r.parent_id = ? or r.user_id = ?)
       `;
       
     //  whereConditions.push('(r.superparent_id = ? OR r.parent_id = ?)');
-      params.push(userId, userId,userId,userId);
+      params.push(userId, userId,userId,userId , userId);
       break;
       
     case 2:
