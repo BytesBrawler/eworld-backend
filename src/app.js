@@ -18,6 +18,10 @@ app.use(express.urlencoded({extended: true, limit: "16kb"}))
 // app.use(express.static("public"))
 app.use(cookieParser())
 
+// Add comprehensive request/response logging
+const { requestResponseLogger } = require("./middlewares/logging.middleware.js");
+app.use(requestResponseLogger);
+
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname, '..', 'web')));
 

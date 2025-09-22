@@ -2,6 +2,10 @@ const axios = require('axios');
 const { parseStringPromise } = require('xml2js');
 const db = require("../db");
 const qs = require('qs');
+const { createModuleLogger, logApiCallDetailed } = require("../utils/logger");
+
+// Create module-specific logger for external API calls
+const logger = createModuleLogger('dynamic-recharge');
 
 
 async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
@@ -12,8 +16,12 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
 
     if (!provider || !api) throw new Error('API config not found');
 
-    console.log('Provider:', provider);
-    console.log('API:', api);
+    logger.debug({ 
+      providerId: apiProviderId, 
+      providerName: provider.name,
+      apiId: apiId,
+      apiName: api.name 
+    }, 'API configuration loaded');
 
     if(api.status === 0 ){
       return {
@@ -33,7 +41,7 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
           try {
             parsed = JSON.parse(input);
           } catch (err) {
-            console.error("Invalid JSON string:", input);
+            logger.error({ input, error: err.message }, "Invalid JSON configuration");
             return {};
           }
         } else if (typeof input === 'object') {
@@ -59,26 +67,21 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
       ...replacePlaceholders(api.headers),
     };
 
-    console.log('Headers:', headers);
-
-  
-
     const bodyParams = {
       ...replacePlaceholders(provider.body_params),
       ...replacePlaceholders(api.body_params),
     };
-
-  
-    console.log('Body Params:', bodyParams);
-
-  
 
     const queryParams = {
         ...replacePlaceholders(provider.query_params),
         ...replacePlaceholders(api.query_params),
       };
   
-      console.log('Query Params:', queryParams);
+    logger.debug({ 
+      headers, 
+      bodyParamsCount: Object.keys(bodyParams).length,
+      queryParamsCount: Object.keys(queryParams).length
+    }, 'Request parameters prepared');
   
 
     // 3. Build URL
@@ -87,7 +90,6 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
     if (api.request_url_endpoint?.toLowerCase().startsWith('http')) {
       // If endpoint is a complete URL, use it directly, and don't build extra body/params
       fullUrl = api.request_url_endpoint.replace(/\[([^\]]+)\]/g, (_, k) => paramMap[k] || '');
-      console.log('Full URL:', fullUrl);
 
       config = {
       method: api.request_type?.toLowerCase() || 'get',
@@ -107,7 +109,12 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
       }
       }
 
-      console.log('Config:', config);
+      logger.debug({ 
+        method: config.method, 
+        url: fullUrl, 
+        timeout: config.timeout,
+        hasData: !!config.data
+      }, 'Direct URL configuration prepared');
 
       // Skip further param/body/query building
       // Return config here to avoid duplicate declaration below
@@ -116,7 +123,12 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
       const port = api.request_port && api.request_port !== '0' ? `:${api.request_port}` : '';
       fullUrl = `${provider.base_url}${port}${api.request_url_endpoint}`.replace(/\[([^\]]+)\]/g, (_, k) => paramMap[k] || '');
 
-      console.log('Full URL22:', fullUrl);
+      logger.debug({ 
+        baseUrl: provider.base_url, 
+        port, 
+        endpoint: api.request_url_endpoint, 
+        fullUrl 
+      }, 'Composite URL built');
      
       // 4. Axios config
       if(api.request_type?.toLowerCase() === 'get'){
@@ -147,39 +159,50 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
     }
 
 
-    console.log("configsss are ", config);
-  //  if (config.method === 'post') config.data = bodyParams;
-
-// Handle Content-Type and modify bodyParams accordingly
-
-
-  
-  console.log(2);
-  // 5. Make API request
-  let response;
-  try {
-    response = await axios(config);
-    console.log(response);
-    console.log('Response:', response.data);
-  } catch (error) {
-    response =   error.response
-    console.log('Error:', response);
-    console.log('Error:', error);
-    console.error('Error:', error.response.data);
- 
-  }
-
-  console.log(3);
+    // Log external API call attempt
+    const apiCallStart = Date.now();
+    logger.info({
+      provider: provider.name,
+      api: api.name,
+      method: config.method?.toUpperCase(),
+      url: config.url,
+      timeout: config.timeout
+    }, '🔄 External API call initiated');
 
     // 5. Make API request
-    // const response = await axios(config);
+    let response;
+    try {
+      response = await axios(config);
+      const duration = Date.now() - apiCallStart;
+      
+      logApiCallDetailed(
+        provider.name,
+        api.name,
+        paramMap,
+        response.data,
+        duration
+      );
 
-    console.log('API Response:', response.data);
+    } catch (error) {
+      const duration = Date.now() - apiCallStart;
+      response = error.response;
+      
+      logApiCallDetailed(
+        provider.name,
+        api.name,
+        paramMap,
+        error.response?.data || error.message,
+        duration,
+        error
+      );
+    }
 
-    console.log('format',api.response_format_type?.toLowerCase());
+    logger.debug({ 
+      responseFormat: api.response_format_type?.toLowerCase(),
+      statusCode: response?.status 
+    }, 'Processing API response');
 
     const responseCheckData = await responseCheck(api , response);
-    console.log("responseCheckData", responseCheckData);
 
     let newMessage = responseCheckData?.messageToforward;
 
@@ -202,7 +225,13 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
 
 
   } catch (err) {
-    console.error('Recharge error:', err.message);
+    logger.error({ 
+      error: err.message, 
+      stack: err.stack,
+      apiProviderId,
+      apiId 
+    }, '❌ Dynamic recharge call failed');
+    
     return {
       status: 'error',
       error: err.message,
@@ -211,7 +240,11 @@ async function dynamicRechargeCall(apiProviderId, apiId, paramMap = {}) {
 }
 
 async function responseCheck(api, response) {
-  console.log("responseCheck called with api", api);
+  logger.debug({ 
+    apiName: api.name, 
+    responseFormat: api.response_format_type,
+    statusCode: response?.status 
+  }, 'Response check initiated');
   
   const divider = api.divider || '&';
 
@@ -226,12 +259,12 @@ async function responseCheck(api, response) {
   } else if (format === 'xml') {
     parsedData = await parseStringPromise(response.data);
   } else if (format === 'text') {
-    console.log('Parsing response as text');
+
 
     function parseKeyValueString(responseText, divider = '|') {
       const result = {};
       const parts = responseText.trim().split(divider);
-      console.log('Parts:', parts);
+
     
       for (const part of parts) {
         // Support both '=' and ':' as key-value separators
@@ -273,7 +306,8 @@ async function responseCheck(api, response) {
         parsedData = {
           [simpleText]: simpleText // key and value are the same
         };
-        console.log('Simple text response:', parsedData);
+        logger.info('Detected simple text response without key-value pairs', simpleText);
+
       } else {
         // Try to match any key with a number value
         const balanceRegex = /([a-zA-Z ]+)[=:]\s*([0-9.]+)/g;
@@ -295,7 +329,10 @@ async function responseCheck(api, response) {
     throw new Error('Unsupported response format');
   }
 
-  console.log('Parsed Data:', parsedData);
+  logger.debug({ 
+    parsedDataType: typeof parsedData,
+    dataSize: JSON.stringify(parsedData).length 
+  }, 'Response data parsed successfully');
 
   const key1 = api.key1;
   const key2 = api.key2;
@@ -319,7 +356,7 @@ async function responseCheck(api, response) {
 
   } else if (format.startsWith('json')) {
     const data = Array.isArray(parsedData) ? parsedData[0] : parsedData;
-    console.log("datas", data);
+
     verifingrule = evaluateRulesOnData(rules, data);
 
   } else if (format === 'xml') {
@@ -343,12 +380,12 @@ async function responseCheck(api, response) {
   if (api.response_filter && parsedData[api.response_filter] !== undefined) {
     parsedData = parsedData[api.response_filter];
   }
-  console.log(parsedData);
+
 
   // Extract filtered fields
   const extractFromData = (key) => {
     if (!key) return null;
-    console.log("key is", key);
+
     if (format === 'string') {
       return parsedData[key.toLowerCase()] || null;
     }
@@ -356,13 +393,11 @@ async function responseCheck(api, response) {
 
     if(format === 'xml') {
       const root = Object.values(data)[0]; // first XML node
-      console.log("root", root);
-      console.log("key", key);
-      console.log("root[key]", root?.[key]);
+
       return root?.[key] ? root[key][0] : null;
     }
 
-    console.log("data is", data);
+
     // For text, also try lowercased key
     if (format === 'text') {
       return data?.[key.toLowerCase()] ?? null;
@@ -383,7 +418,7 @@ async function responseCheck(api, response) {
   };
 
   if(!verifingrule) {
-    console.log("No rules matched");
+
     return {
       status: status,
       filters: filters,
@@ -400,13 +435,13 @@ async function responseCheck(api, response) {
   value2 = verifingrule.key2 ? parsedData?.[verifingrule.key2]?.toString() || '' : null;
   messageToforward = verifingrule.forwardMessage ? verifingrule.forwardMessage || '' : null;
 
-  console.log(`1`);
+
   if (verifingrule.action === 'mark as success' || verifingrule.action === 'return data' || verifingrule.action === 'return balance') {
     status = 'success';
-    console.log("marking as success");
+
   } 
   else if (verifingrule.action === 'return to user' || verifingrule.action === 'return failure') {
-    console.log("returning");
+
     status = 'failed';
     returnToUser = true;
   } 
@@ -497,8 +532,7 @@ function checkCondition(actual = '', condition, expected = '') {
 }
 
 function evaluateRulesOnData(rules, dataObj) {
-  console.log("evaluateRulesOnData called with rules", rules);
-console.log("dataObj", dataObj);
+
   for (const rule of rules) {
     const actual1 = dataObj?.[rule.key1]?.toString() || '';
     const actual2 = rule.key2 ? dataObj?.[rule.key2]?.toString() || '' : null;
@@ -508,8 +542,7 @@ console.log("dataObj", dataObj);
       ? checkCondition(actual2, rule.condition2, rule.value2)
       : true;
 
-      console.log(dataObj);
-      console.log("rule", rule);
+
 
     // STRICT: If rule has 2 keys, both must match
     if (rule.key2) {

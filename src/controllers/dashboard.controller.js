@@ -80,6 +80,7 @@ const curDate = formatDate(endOfToday); // e.g., '2025-06-24 23:59:59'
     `SELECT COUNT(*) as totalCount, SUM(amount) as total_amount
 FROM recharges
 WHERE status = 'success'
+and type = 'recharges'
   AND DATE(created_at) = CURDATE();
 `,
    
@@ -95,7 +96,7 @@ WHERE status = 'success'
     [eDate, curDate]
   );
   const [[totalBalanceTransactions]] = await db.query(
-    `SELECT COUNT(*) as totalCount, sum(amount)  as total_amount FROM bal_transactions WHERE status = 'success' AND created_at BETWEEN ? AND ?`,
+    `SELECT COUNT(*) as totalCount, sum(amount)  as total_amount FROM bal_transactions WHERE status = 'success' AND transaction_type = 'online' and created_at BETWEEN ? AND ?`,
     [eDate, curDate]
   );
 
@@ -160,6 +161,7 @@ const [[totalRecharges]] = await db.query(
     `SELECT COUNT(*) as totalCount, SUM(amount) as total_amount
 FROM recharges
 WHERE status = 'success'
+and type = 'recharges'
   AND DATE(created_at) = CURDATE();
 `,
    
@@ -170,7 +172,7 @@ WHERE status = 'success'
     [eDate, curDate]
   );
   const [[totalBalanceTransactions]] = await db.query(
-    `SELECT COUNT(*) as totalCount, sum(amount)  as total_amount FROM bal_transactions WHERE status = 'success' AND DATE(created_at) = CURDATE()`,
+    `SELECT COUNT(*) as totalCount, sum(amount)  as total_amount FROM bal_transactions WHERE status = 'success' AND transaction_type = 'online' and  created_at BETWEEN ? AND ?`,
     [eDate, curDate]
   );
 

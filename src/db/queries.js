@@ -74,7 +74,7 @@ async function updateUser(userId, userData) {
     "role_id",
     "margin_rates",
     "is_flat_margin",
-    "can_edit_retailer",
+    "can_edit",
     "can_withdraw",
     "can_set_margin",
     "status",
@@ -101,13 +101,18 @@ async function updateUser(userId, userData) {
   // Add userId to the end of values for the WHERE clause
   values.push(userId);
 
+  console.log("Set Clause: ", setClause);
+
   const query = `
     UPDATE users 
     SET ${setClause}, updated_at = CURRENT_TIMESTAMP 
     WHERE id = ?
   `;
 
+  console.log("Final Query: ", query);
+
   const [result] = await db.query(query, values);
+  console.log("Update Result: ", result);
   return result;
 }
 

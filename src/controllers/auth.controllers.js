@@ -174,7 +174,7 @@ const updateUser = asyncHandler(async (req, res) => {
     long,
     is_flat_rate,
     margin_rates,
-    can_edit_retailer,
+    can_edit,
     can_withdraw,
     can_set_margin,
     status
@@ -184,7 +184,10 @@ const updateUser = asyncHandler(async (req, res) => {
   // Validate required fields
   if (!id || !person || !mobile || !email || !company || !address) {
     throw new ApiError(400, "All required fields must be provided");
+    
   }
+
+  let can_edit_retailer = can_edit;
 
   // Fetch existing user details
   const existingUser = await query.users({ id });
@@ -193,6 +196,7 @@ const updateUser = asyncHandler(async (req, res) => {
   }
 
   console.log(req.user);
+  console.log(existingUser);
 
   // Check role access
   const hasRoleAccess = await getRoleAccess(
@@ -213,12 +217,12 @@ const updateUser = asyncHandler(async (req, res) => {
   }
 
   console.log("margin rates", margin_rates);
-  if (margin_rates !== existingUser.margin_rates) {
-    console.log("this is not equal");
+  // if (margin_rates !== existingUser.margin_rates) {
+  //   console.log("this is not equal");
     if (margin_rates == "") {
       margin_rates = null;
     }
-  }
+ // }
   // Prepare update data
   const updateData = {
     person,
@@ -229,7 +233,7 @@ const updateUser = asyncHandler(async (req, res) => {
     role_id: role || existingUser.role_id,
     margin_rates: margin_rates,
     is_flat_margin: is_flat_rate ?? existingUser.is_flat_margin,
-    can_edit_retailer: can_edit_retailer ?? existingUser.can_edit_retailer,
+    can_edit: can_edit_retailer ?? existingUser.can_edit,
     can_withdraw: can_withdraw ?? existingUser.can_withdraw,
     can_set_margin: can_set_margin ?? existingUser.can_set_margin,
     status: status ?? existingUser.status,

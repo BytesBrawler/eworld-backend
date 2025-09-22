@@ -1238,8 +1238,10 @@ const getepayGenerateOrder = asyncHandler(async (req, res) => {
 const getepayCallback = asyncHandler(async (req, res) => {
   console.log("Getepay Callback received:", req.body);
   console.log("Getepay Callback received:", req.query);
-  console.log("Getepay Callback received:", req);
-  const { response } = req.body;
+
+  const {response} = req.body;
+
+  console.log("Getepay Response:", response);
 
   if (!response) {
     return res.status(400).json({ status: false, message: "Missing response data" });
@@ -1250,12 +1252,15 @@ const getepayCallback = asyncHandler(async (req, res) => {
     const callbackData = GetepayUtils.getepayResponse(config, response);
     console.log("Getepay Callback Data:", callbackData);
 
-    if (!callbackData || !callbackData.merchantTransactionId) {
+    if (!callbackData) {
       return res.status(400).json({ status: false, message: "Invalid callback data" });
     }
+    let isCallback = true;
 
-    const orderId = callbackData.merchantTransactionId;
-    const result = await verifyAndProcessGetepayTransaction(orderId, callbackData);
+
+
+    const orderId =callbackData.merchantOrderNo || callbackData.merchantTransactionId;
+    const result = await verifyAndProcessGetepayTransaction(orderId, callbackData , isCallback);
 
     return res.status(result.status === "success" ? 200 : 400).json(result);
 
@@ -1276,6 +1281,9 @@ const getepayStatusCheck = asyncHandler(async (req, res) => {
   // Store the original transaction status before processing
   const [originalTxn] = await db.query("SELECT * FROM transactions WHERE order_id = ? LIMIT 1", [order_id]);
   const originalStatus = originalTxn[0]?.status;
+
+
+
 
   const result = await verifyAndProcessGetepayTransaction(order_id);
   console.log("Getepay status result:", result);
@@ -1535,6 +1543,247 @@ const getRecentTransactions = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * Mark Getepay transaction as success manually
+ */
+const getepayMarkSuccess = asyncHandler(async (req, res) => {
+  const { order_id, amount } = req.body;
+
+  if (!order_id) {
+    throw new ApiError(400, "order_id is required");
+  }
+
+  if (!amount || amount <= 0) {
+    throw new ApiError(400, "Valid amount is required");
+  }
+
+  try {
+    // Find the transaction
+    const [transactionRows] = await db.query(
+      "SELECT * FROM transactions WHERE order_id = ? LIMIT 1",
+      [order_id]
+    );
+
+    if (transactionRows.length === 0) {
+      throw new ApiError(404, "Transaction not found");
+    }
+
+    const transaction = transactionRows[0];
+
+    // Check if transaction is already successful
+    if (transaction.status.toLowerCase() === 'success') {
+      throw new ApiError(400, "Transaction is already marked as successful");
+    }
+
+    // Verify the amount matches
+    if (parseFloat(amount) !== parseFloat(transaction.amount)) {
+      throw new ApiError(400, "Amount mismatch. Expected: " + transaction.amount + ", Received: " + amount);
+    }
+
+    // Get user details and apply margin calculation logic (same as verifyAndProcessGetepayTransaction)
+    const userId = transaction.user_id;
+    const user = await query.users({id: userId});
+    
+    let processedAmount = amount;
+    let originalAmount = amount;
+
+    if (user.is_flat_margin === 1) {
+      processedAmount = Number(amount) + (Number(user.margin_rates) * Number(amount) / 100);
+    }
+
+    // Get admin user (same as verifyAndProcessGetepayTransaction)
+    const adminRes = await db.query("SELECT * FROM users WHERE id = 1");
+    const admin = adminRes[0][0];
+
+    // Check admin balance (optional, can be commented out like in verify function)
+    // if (admin.balance < processedAmount) {
+    //   throw new ApiError(400, "Admin balance is insufficient");
+    // }
+
+    // Add balance using the proper balanceAddition function (same as verifyAndProcessGetepayTransaction)
+    const result = await balanceAddition(admin, processedAmount, userId, originalAmount, {
+      orderId: order_id, 
+      type: 'online',
+      operationType: 'credit'
+    }, `Manual success: Transaction ${order_id} marked as successful by admin`);
+
+    if (result.status !== "success") {
+      throw new ApiError(500, "Balance addition failed");
+    }
+
+    // Update transaction status to success
+    const updateResult = await db.query(`
+      UPDATE transactions 
+      SET status = 'success', 
+          updated_at = NOW(),
+          manual_update_by = ?,
+          manual_update_reason = 'Manually marked as success by admin'
+      WHERE order_id = ?
+    `, [req.user.id, order_id]);
+
+    // Log the manual status change
+    await logStatusCheck(
+      order_id, 
+      transaction.id, 
+      'manual_success', 
+      { 
+        manualUpdate: true, 
+        updatedBy: req.user.id, 
+        amount: processedAmount,
+        originalAmount: originalAmount,
+        previousBalance: result.balanceBeforeAddition,
+        newBalance: result.balanceAfterAddition,
+        adminPreviousBalance: result.balanceBeforeDeduction,
+        adminNewBalance: result.balanceAfterDeduction,
+        marginApplied: user.is_flat_margin === 1,
+        marginRate: user.margin_rates
+      }, 
+      transaction.status, 
+      'success', 
+      true, 
+      parseFloat(processedAmount),
+      { manual: true, admin_id: req.user.id, processed_amount: processedAmount, original_amount: originalAmount },
+      null
+    );
+
+    // Send notification messages (same as verifyAndProcessGetepayTransaction)
+    const userName = user.person || "Eworld User";
+    const userShop = user.company || "";
+    const userMobile = user.mobile || "";
+
+    // Send notification to user
+    messageUtils.sendMessageToUser(
+      userId,
+      `Dear ${userName}(${userShop}), Balance of ${processedAmount} has been added to your account ${userMobile} with reference: ${order_id}. Manually processed by admin. Thank you for using Eworld!`,
+      "number"
+    );
+    
+    // Send notification to admin
+    messageUtils.sendMessageToUser(
+      1,
+      `Dear Admin, Balance of ${processedAmount} has been manually added to ${userName}(${userShop})-${userMobile} with reference: ${order_id}.`,
+      "number"
+    );
+
+    messageUtils.sendMessageToUser(
+      userId,
+      `Your Eworld wallet balance has been credited with ${processedAmount} (manually processed by admin)`
+    );
+
+    const updatedTransaction = {
+      ...transaction,
+      status: 'success',
+      updated_at: new Date(),
+      prev_balance: result.balanceBeforeAddition,
+      new_balance: result.balanceAfterAddition
+    };
+
+    res.status(200).json(new ApiResponse(200, {
+      message: "Transaction marked as successful and balance added",
+      transaction_data: updatedTransaction,
+      balance_added: processedAmount,
+      original_amount: originalAmount,
+      previous_balance: result.balanceBeforeAddition,
+      new_balance: result.balanceAfterAddition,
+      admin_previous_balance: result.balanceBeforeDeduction,
+      admin_new_balance: result.balanceAfterDeduction,
+      user_details: {
+        id: user.id,
+        person: userName,
+        mobile: userMobile,
+        company: userShop
+      }
+    }, "Transaction marked as successful"));
+
+  } catch (error) {
+    console.error("Getepay Mark Success Error:", error.message);
+    throw new ApiError(500, error.message || "Failed to mark transaction as successful");
+  }
+});
+
+/**
+ * Mark Getepay transaction as failed manually
+ */
+const getepayMarkFailed = asyncHandler(async (req, res) => {
+  const { order_id, reason } = req.body;
+
+  if (!order_id) {
+    throw new ApiError(400, "order_id is required");
+  }
+
+  try {
+    // Find the transaction
+    const [transactionRows] = await db.query(
+      "SELECT * FROM transactions WHERE order_id = ? LIMIT 1",
+      [order_id]
+    );
+
+    if (transactionRows.length === 0) {
+      throw new ApiError(404, "Transaction not found");
+    }
+
+    const transaction = transactionRows[0];
+
+    // Check if transaction is already failed
+    if (transaction.status.toLowerCase() === 'failed') {
+      throw new ApiError(400, "Transaction is already marked as failed");
+    }
+
+    // Check if transaction is successful (shouldn't fail a successful transaction)
+    if (transaction.status.toLowerCase() === 'success') {
+      throw new ApiError(400, "Cannot mark a successful transaction as failed. Use refund instead.");
+    }
+
+    const failReason = reason || 'Manually marked as failed by admin';
+
+    // Update transaction status to failed
+    const updateResult = await db.query(`
+      UPDATE transactions 
+      SET status = 'failed', 
+          error_message = ?,
+          updated_at = NOW(),
+          manual_update_by = ?,
+          manual_update_reason = ?
+      WHERE order_id = ?
+    `, [failReason, req.user.id, failReason, order_id]);
+
+    // Log the manual status change
+    await logStatusCheck(
+      order_id, 
+      transaction.id, 
+      'manual_failed', 
+      { 
+        manualUpdate: true, 
+        updatedBy: req.user.id, 
+        reason: failReason
+      }, 
+      transaction.status, 
+      'failed', 
+      false, 
+      0,
+      { manual: true, admin_id: req.user.id, reason: failReason },
+      failReason
+    );
+
+    const updatedTransaction = {
+      ...transaction,
+      status: 'failed',
+      error_message: failReason,
+      updated_at: new Date()
+    };
+
+    res.status(200).json(new ApiResponse(200, {
+      message: "Transaction marked as failed",
+      transaction_data: updatedTransaction,
+      failure_reason: failReason
+    }, "Transaction marked as failed"));
+
+  } catch (error) {
+    console.error("Getepay Mark Failed Error:", error.message);
+    throw new ApiError(500, error.message || "Failed to mark transaction as failed");
+  }
+});
+
 // Helper function for Getepay transaction verification
 // Helper function to log status check attempts
 const logStatusCheck = async (orderId, transactionId, checkType, statusData, previousStatus, updatedStatus, balanceProcessed = false, balanceAmount = 0, requestData = null, errorMessage = null) => {
@@ -1598,7 +1847,7 @@ const logStatusCheck = async (orderId, transactionId, checkType, statusData, pre
   }
 };
 
-const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) => {
+const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null , isCallback = false) => {
   const [rows] = await db.query("SELECT * FROM transactions WHERE order_id = ? LIMIT 1", [orderId]);
   const transaction = rows[0];
 
@@ -1607,7 +1856,7 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
   }
 
   const previousStatus = transaction.status;
-  const checkType = callbackData ? 'callback' : 'status_check';
+  const checkType = isCallback ? 'callback' : 'status_check';
 
   if (transaction.status === "success") {
     // Log the status check even if already processed
@@ -1615,15 +1864,21 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
     return { status: "success", message: "Transaction already processed" };
   }
 
+   if (transaction.status === "SUCCESS") {
+   
+    return { status: "success", message: "Transaction already processed" };
+  }
+
   try {
     let statusData = callbackData;
     let requestData = null;
+
 
     // If no callback data provided, query Getepay for status
     if (!statusData) {
       if (!transaction.reference_id) {
         const errorMsg = "Payment reference ID not found for this transaction";
-        await logStatusCheck(orderId, transaction.id, 'status_check', null, previousStatus, 'failed', false, 0, null, errorMsg);
+        await logStatusCheck(orderId, transaction.id, checkType, null, previousStatus, 'failed', false, 0, null, errorMsg);
         throw new ApiError(400, errorMsg);
       }
 
@@ -1656,7 +1911,7 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
         console.error("Requery failed:", errorMsg);
         
         // Log the failed status check
-        await logStatusCheck(orderId, transaction.id, 'status_check', requeryResponse, previousStatus, 'failed', false, 0, requestData, errorMsg);
+        await logStatusCheck(orderId, transaction.id, checkType, requeryResponse, previousStatus, 'failed', false, 0, requestData, errorMsg);
         
         // Only update status, not gateway_response
         await db.query(
@@ -1670,6 +1925,14 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
     if (!statusData) {
       const errorMsg = "Unable to verify transaction status";
       await logStatusCheck(orderId, transaction.id, checkType, null, previousStatus, 'failed', false, 0, requestData, errorMsg);
+
+      if(statusData.bankError === "Payment Link Not Initiated"){
+await db.query(
+        "UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+        ["pending", String(orderId)]
+      );
+      return { status: "pending", message: "Transaction is still pending", data: statusData };
+      }
       
       await db.query(
         "UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?",
@@ -1771,8 +2034,37 @@ const verifyAndProcessGetepayTransaction = async (orderId, callbackData = null) 
 
     } else {
       // Log failed status check
-      await logStatusCheck(orderId, transaction.id, checkType, statusData, previousStatus, 'failed', false, 0, requestData, `Transaction failed with status: ${txnStatus}`);
+
+       if(statusData.bankError === "Payment Link Not Initiated"){
+await db.query(
+        "UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+        ["pending", String(orderId)]
+      );
+
+
+       await logStatusCheck(orderId, transaction.id, checkType, statusData, previousStatus, 'pending', false, 0, requestData, `Transaction failed with status: ${txnStatus}`);
+
+
+      return { status: "pending", message: "Transaction is still pending", data: statusData };
+      }
+
+       
+    
       
+
+       if(statusData.errorMsg === "Payment Link Not Initiated"){
+await db.query(
+        "UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+        ["pending", String(orderId)]
+      );
+      
+       await logStatusCheck(orderId, transaction.id, checkType, statusData, previousStatus, 'pending', false, 0, requestData, `Transaction failed with status: ${txnStatus}`);
+
+      return { status: "pending", message: "Transaction is still pending", data: statusData };
+      }
+
+     await logStatusCheck(orderId, transaction.id, checkType, statusData, previousStatus, 'failed', false, 0, requestData, `Transaction failed with status: ${txnStatus}`);
+
       await db.query(
         "UPDATE transactions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?",
         ["failed", String(orderId)]
@@ -2142,6 +2434,8 @@ module.exports = {
   getepayRefund,
   getTransactionStatusLogs,
   getRecentTransactions,
+  getepayMarkSuccess,
+  getepayMarkFailed,
   // Admin transfer methods
   searchParentUsers,
   getParentChildren,

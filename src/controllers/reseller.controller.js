@@ -1,12 +1,24 @@
 const ApiResponse = require("../utils/apiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/apiError");
-const db = require("../db");
+const db = require("../db"); // Use original database
 const crypto = require("crypto");
 const { channel } = require("diagnostics_channel");
 const { calculateUserMargins } = require("./retailer.controller");
 const { dynamicRechargeCall} = require("./dynamicrecharge");
 const messageUtils = require("../utils/sendMessage");
+
+// Import logger only for specific methods
+const { 
+  createModuleLogger, 
+  logBusinessOperation,
+  logFinancialOperation,
+  logRechargeStep,
+  logApiCallDetailed
+} = require("../utils/logger");
+
+// Create module-specific logger for critical operations
+const logger = createModuleLogger('reseller-controller');
 
 async function generateApiKey() {
   const apiKey = crypto.randomBytes(32).toString("hex");
@@ -15,11 +27,11 @@ async function generateApiKey() {
 
 const getApiData = asyncHandler(async (req, res) => {
   let { id } = req.query;
-  console.log("id", id);
+  logger.debug({ queryId: id, requestorId: req.user?.id }, "API data request received");
   if (!id) {
     id = req.user.id;
   }
-  console.log("id", id);
+  logger.info({ targetUserId: id, requestorId: req.user?.id }, "Processing API data for user");
 
   const [[user]] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
   if (!user) {
@@ -29,7 +41,11 @@ const getApiData = asyncHandler(async (req, res) => {
   let apiKey = user.api_key;
   if (!apiKey) {
     apiKey = await generateApiKey();
-    console.log("Generated API Key:", apiKey);
+    logger.info({ 
+      userId: id, 
+      apiKeyLength: apiKey.length,
+      generatedAt: new Date().toISOString()
+    }, "🔑 API Key generated for user");
     await db.query("UPDATE users SET api_key = ? WHERE id = ?", [apiKey, id]);
   }
 
@@ -37,7 +53,11 @@ const getApiData = asyncHandler(async (req, res) => {
     id
   ]);
 
-  console.log("ips", ips);
+  logger.debug({ 
+    userId: id, 
+    whitelistedIPs: ips.length,
+    hasApiKey: !!apiKey
+  }, "Reseller configuration retrieved");
 
   return res
     .status(200)
@@ -70,7 +90,12 @@ const generateNewApiKey = asyncHandler(async (req, res) => {
 
 const addIp = asyncHandler(async (req, res) => {
   let { ip, id } = req.body;
-  console.log(req.body);
+  logBusinessOperation('IP_WHITELIST_REQUEST', {
+    targetUserId: id,
+    ipAddress: ip,
+    requestorId: req.user?.id
+  }, req.user?.id);
+  
   if (!id) {
     id = req.user.id;
     
@@ -128,7 +153,13 @@ const deleteIp = asyncHandler(async (req, res) => {
 
 const EditIp = asyncHandler(async (req, res) => {
   let { ip, ipId, id } = req.body;
-  console.log(req.body);
+  logBusinessOperation('IP_EDIT_REQUEST', {
+    targetUserId: id,
+    ipAddress: ip,
+    ipId,
+    requestorId: req.user?.id
+  }, req.user?.id);
+  
   if (!id) {
     id = req.user.id;
   }
@@ -177,10 +208,15 @@ const updateCallBackUrl = asyncHandler(async (req, res) => {
 });
 
 const recharge = asyncHandler(async (req, res) => {
-  let { opcode, number, amount, account } = req.query;
+  let { opcode, number, amount, account, resellerId } = req.query;
   // if (!keywordId) throw new ApiError(400, "Keyword is required");
 
-  console.log("req.query", req.query);
+  logBusinessOperation('RESELLER_RECHARGE_INITIATED', {
+    opcode,
+    number: number?.substring(0, 4) + '****', // Mask sensitive data
+    amount,
+    account: account?.substring(0, 4) + '****'
+  }, req.user?.id);
   
 
   //will get the keyword id from the opcode
@@ -188,7 +224,7 @@ const recharge = asyncHandler(async (req, res) => {
     opcode
   ]);
 
-  console.log("keyword", keyword);
+  logger.debug({ opcode, keywordFound: !!keyword }, "Keyword lookup completed");
   if (!keyword) {
     return res
       .status(400)
@@ -196,16 +232,33 @@ const recharge = asyncHandler(async (req, res) => {
   }
   const keywordId = keyword.id;
 
-  console.log(keywordId);
+  logger.info({ 
+    keywordId, 
+    operatorCode: keyword.code,
+    operatorName: keyword.operator 
+  }, "Keyword resolved for recharge");
 
   let userId = req.user.id;
   const balance1 = req.user.balance;
-  console.log(balance1);
+  
+  logRechargeStep('BALANCE_VALIDATION', {
+    id: 'reseller-recharge',
+    userId,
+    keywordId,
+    amount,
+    customerNumber: number
+  }, { currentBalance: balance1 });
 
   const balance = parseFloat(balance1); // or Number(user.balance)
   amount = parseFloat(amount); // or Number(req.body.amount)
 
   if (balance < amount) {
+    logger.error({
+      userId,
+      currentBalance: balance,
+      requestedAmount: amount,
+      shortfall: amount - balance
+    }, '❌ Insufficient balance for reseller recharge');
     return res
       .status(400)
       .json({ status: "failed", message: "Insufficient balance" });
@@ -213,21 +266,30 @@ const recharge = asyncHandler(async (req, res) => {
 
   const [[user]] = await db.query(`SELECT * FROM users WHERE id = ?`, [userId]);
 
-  console.log("userId", userId);
-  console.log("amount", amount);
-  console.log("keywordId", keywordId);
-  console.log("number", number);
+  logger.info({
+    userId,
+    amount,
+    keywordId,
+    customerNumber: number?.substring(0, 4) + '****',
+    rechargeType: 'reseller-api'
+  }, "🔄 Processing reseller recharge request");
 
   // 1. Get Keyword Details
   const [keywordRows] = await db.query("SELECT * FROM keywords WHERE id = ?", [
     keywordId
   ]);
   if (keywordRows.length === 0) throw new ApiError(404, "Keyword not found");
-  console.log(keywordRows);
+  
+  logger.debug({ keywordCount: keywordRows.length, keywordId }, "Keyword details retrieved");
   //match keyword data
 
   const keywordDetails = keywordRows[0];
-  console.log(keywordDetails);
+  logger.debug({ 
+    keywordId, 
+    operatorCode: keywordDetails.code,
+    minRecharge: keywordDetails.min_recharge,
+    maxRecharge: keywordDetails.max_recharge
+  }, "Keyword validation details");
 
 
 
@@ -274,7 +336,12 @@ const [setting] = await db.query(
       ]
     );
 
-    console.log("old recharged", oldRecharged);
+    logger.debug({ 
+      duplicateCount: oldRecharged.length,
+      timeWindowSeconds: seconds,
+      userId,
+      keywordId
+    }, "Duplicate recharge check completed for reseller API");
 
     if (oldRecharged.length > 0) {
       // Compare using timestamps to avoid string/date mismatch
@@ -286,10 +353,17 @@ const [setting] = await db.query(
         const minutes = Math.floor(remainingTime / 60000);
         const secondsLeft = Math.floor((remainingTime % 60000) / 1000);
 
-        throw new ApiError(
-          400,
-          `Please Try Again After ${minutes} Minutes and ${secondsLeft} Seconds`
-        );
+        return res.status(200).json(
+    {
+      status: "failed",
+      message:`Your current recharge is failed as you have already recharged this number with same amount recently. Please try after ${minutes} minutes and ${secondsLeft} seconds`,
+      amount: amount,
+      number: number,
+      account: account,
+      opId: null
+    }
+    );
+
       }
     }
 
@@ -313,7 +387,11 @@ const [setting] = await db.query(
     [amount, keywordId, amount]
   );
 
-  console.log("lines with prevalues", lines);
+  logger.debug({ 
+    linesFoundWithPreValues: lines.length,
+    keywordId,
+    amount
+  }, "API lines retrieved with pre-values for reseller");
 
   if (lines.length === 0) {
     byvalue = false;
@@ -337,29 +415,34 @@ const [setting] = await db.query(
     );
   }
 
-  console.log("lines without prevalues", lines);
+  logger.debug({ 
+    linesFoundWithoutPreValues: lines.length,
+    byValue: byvalue,
+    keywordId,
+    amount 
+  }, "API lines retrieved without pre-values for reseller");
   // let reqId = `${keywordId}${userId}${Date.now().toString().slice(-5)}`;
 
   if (lines.length === 0) {
 
     let [addRecharge] = await db.query(
-      `INSERT INTO recharges (user_id, keyword_id, account, number, amount, deducted_amount, params,  user_prev_balance , user_new_balance, status) VALUES (?, ?,  ?, ?, ?, ?, ?, ?, ?,?)`,
+      `INSERT INTO recharges (user_id, keyword_id, account, number, amount, deducted_amount,   user_prev_balance , user_new_balance, status,resellerId) VALUES (?, ?,  ?, ?, ?, ?, ?, ?,?,?)`,
       [
         userId,
         keywordId,
         account,
-        customerNumber,
+        number,
         amount,
         amount,
-        JSON.stringify(params),
         balance ,
         balance - amount,
-        "pending"
+        "failed",
+        resellerId
       ]
     );
 
     const reqId = addRecharge.insertId;
-     params.reqid = reqId;
+
 
     await db.query(`update recharges set reqid = ? where id = ?`, [
       reqId,
@@ -370,12 +453,13 @@ const [setting] = await db.query(
 
     return res.status(200).json(
     {
-      status: "pending",
-      message: "Your request is logged",
+      status: "failed",
+      message: "Your recharge is failed",
       txnId: reqId,
       amount: amount,
       number: number,
-      account: account
+      account: account,
+      opId: null
     }
     );
 
@@ -384,13 +468,30 @@ const [setting] = await db.query(
     //   message: "No lines available for this recharge"
     // });
   }
-  console.log(lines);
+  
+  logger.debug({ 
+    totalLines: lines.length,
+    rechargeType: 'reseller-api',
+    hasLines: lines.length > 0
+  }, "Processing reseller recharge with available lines");
 
-
+    // Log balance deduction for reseller
+    const balanceAfter = balance - amount;
+    logFinancialOperation('RESELLER_BALANCE_DEDUCTION', userId, amount, balance, balanceAfter);
+    
     const [updateBalance] = await db.query(
       `UPDATE users SET balance = balance - ? WHERE id = ?`,
       [amount, userId]
     );
+
+    logger.info({
+      userId,
+      deductedAmount: amount,
+      previousBalance: balance,
+      newBalance: balanceAfter,
+      rowsAffected: updateBalance.affectedRows,
+      rechargeType: 'reseller-api'
+    }, '💰 Balance deducted for reseller recharge');
     if (updateBalance.affectedRows === 0) {
       return res
         .status(400)
@@ -451,7 +552,7 @@ const [setting] = await db.query(
 //genreate 6 digit reqid transaction id
 
   [addRecharge] = await db.query(
-    `INSERT INTO recharges (user_id, keyword_id, account, number, amount, deducted_amount, params, user_prev_balance , user_new_balance , channel) VALUES (?, ?,  ?, ?, ?, ?, ?, ?, ? , ?)`,
+    `INSERT INTO recharges (user_id, keyword_id, account, number, amount, deducted_amount, params, user_prev_balance , user_new_balance , channel,resellerId) VALUES (?, ?,  ?, ?, ?, ?, ?, ?, ? , ?,?)`,
     [
       userId,
       keywordId,
@@ -460,10 +561,10 @@ const [setting] = await db.query(
       amount,
       amount,
       JSON.stringify(params),
-
       req.user.balance,
       balance - amount,
-      "api"
+      "api",
+      resellerId
     ]
   );
 
@@ -551,10 +652,34 @@ const [setting] = await db.query(
       continue;
     }
 
+    // Log API call attempt for reseller
+    const apiCallStart = Date.now();
+    logRechargeStep('RESELLER_API_CALL_START', {
+      id: reqId,
+      userId,
+      keywordId,
+      amount,
+      customerNumber: number
+    }, {
+      attempt,
+      provider: currentline.api_provider,
+      apiEndpoint: currentline.recharge_api
+    });
+
     const rechargeResponse = await dynamicRechargeCall(
       currentline.api_provider,
       currentline.recharge_api,
       attemptParams
+    );
+
+    const apiCallDuration = Date.now() - apiCallStart;
+    logApiCallDetailed(
+      currentline.api_provider,
+      currentline.recharge_api,
+      attemptParams,
+      rechargeResponse,
+      apiCallDuration,
+      rechargeResponse?.status === "error" ? new Error("Reseller API call failed") : null
     );
 
     // if (rechargeResponse.status == "error") {
@@ -579,7 +704,7 @@ const [setting] = await db.query(
         ["pending", currentline.balance,  JSON.stringify(rechargeResponse) ,finalMessage, gigId]
       );
       
-        if (rechargeResponse.status === "pending" && currentline.status_check_api) {
+      if (rechargeResponse.status === "pending" && currentline.status_check_api) {
       finalMessage =  "Recharge Pending";
     let  finalTxnid = rechargeResponse.filters.tid;
       // Check status once
@@ -690,7 +815,6 @@ const [setting] = await db.query(
       finalStatus = "pending";
       finalMessage = rechargeResponse.message || "Recharge Pending";
       finalTxnid = rechargeResponse.filters.tid;
-
       finalFilters = rechargeResponse.filters;
       break;
     }
@@ -1031,34 +1155,53 @@ const [setting] = await db.query(
 
 const statusCheck = asyncHandler(async (req, res) => {
   let { txnid } = req.query;
-  console.log("txnid", txnid);
+  
+  // Log status check request
+  logBusinessOperation('RESELLER_STATUS_CHECK', { txnid }, req.user.id);
+  
   if (!txnid) {
+    logger.error({ userId: req.user.id }, 'Status check failed - missing transaction ID');
     return res
       .status(400)
       .json({ status: "failed", message: "Transaction ID is required" });
   }
 
-
-
   const [[recharge]] = await db.query(
-    "SELECT * FROM recharges WHERE reqid = ?",
-    [txnid]
+    "SELECT * FROM recharges WHERE resellerId = ? and user_id = ? ORDER BY created_at DESC LIMIT 1",
+    [txnid, req.user.id]
   );
-  console.log("recharge", recharge);
+  
+  logger.debug({ 
+    txnid, 
+    rechargeFound: !!recharge,
+    userId: req.user.id 
+  }, 'Status check query completed');
 
-  if (recharge.length === 0 || recharge === null) {
+  if (!recharge) {
+    logger.warn({ txnid, userId: req.user.id }, 'Status check failed - recharge not found');
     return res
       .status(400)
-      .json({ status: "failed", message: "Recharge not found" });
+      .json({ status: "false", message: "Recharge not found" });
   }
 
   if(recharge.user_id != req.user.id){
+    logger.warn({ 
+      txnid, 
+      requestUserId: req.user.id, 
+      rechargeUserId: recharge.user_id 
+    }, 'Status check failed - unauthorized access attempt');
     return res
       .status(400)
       .json({ status: "failed", message: "Recharge not found" });
   }
 
-  // inned data like
+  // Log successful status check
+  logger.info({
+    txnid,
+    userId: req.user.id,
+    status: recharge.status,
+    amount: recharge.amount
+  }, 'Status check successful');
 
   const data = {
     status: recharge.status,
@@ -1066,22 +1209,31 @@ const statusCheck = asyncHandler(async (req, res) => {
     amount: recharge.amount,
     number: recharge.number,
     account: recharge.account,
-    txnId: recharge.reqId
+    txnId: recharge.reqId,
+    opId: recharge.opId
   };
 
   return res.status(200).json(data);
 });
 
 const balanceCheck = asyncHandler(async (req, res) => {
+  // Log balance check request
+  logBusinessOperation('RESELLER_BALANCE_CHECK', {}, req.user.id);
+  
   const [balance] = await db.query("SELECT balance FROM users WHERE id = ?", [
     req.user.id
   ]);
   if (balance.length === 0) {
+    logger.error({ userId: req.user.id }, 'User not found during balance check');
     return res
       .status(400)
       .json({ status: "failed", message: "User not found" });
   }
   const userBalance = balance[0].balance;
+  
+  // Log balance retrieved
+  logger.info({ userId: req.user.id, balance: userBalance }, 'Balance check completed');
+  
   return res.status(200).json({ balance: userBalance });
 });
 
@@ -1090,9 +1242,21 @@ const rechargeCallback = asyncHandler(async (req, res) => {
     // Handle both GET and POST callbacks
     const callbackData = req.method === 'GET' ? req.query : req.body;
     
-    console.log("Received callback data:", callbackData);
-    console.log("Request method:", req.method);
-    console.log("Request headers:", req.headers);
+    // Log callback received
+    logBusinessOperation('CALLBACK_RECEIVED', {
+      method: req.method,
+      dataKeys: Object.keys(callbackData),
+      ip: req.ip || req.connection.remoteAddress
+    });
+    
+    logger.info({
+      method: req.method,
+      callbackData,
+      headers: {
+        'content-type': req.get('Content-Type'),
+        'user-agent': req.get('User-Agent')
+      }
+    }, 'Recharge callback received');
 
     // Extract common callback parameters (adjust field names based on your API providers)
     const {

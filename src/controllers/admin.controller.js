@@ -555,50 +555,9 @@ if(lastgig !== null && lastgig !== undefined){
     console.log("updating userr status", getnewRecharge);
 
     recharge.message = "Recharge Successed";
+    
 
-    const data = {
-      status: finalStatus,
-      message: recharge.message,
-      amount: amount,
-      number: recharge.number,
-      account: recharge.account,
-      txnId: recharge.reqid,
-      opId: recharge.opId
-    };
-
-    messageUtils.sendMessageToUser(
-      user.id,
-      `Your Recharge is ${finalStatus} for ${recharge.number}`,
-      "number"
-    );
-
-    ///call to callback url
-    if (user.callback_url) {
-      try {
-        const callbackUrl = user.callback_url;
-        const callbackParams = {
-          ...data
-        };
-        console.log("callbackParams", callbackParams);
-        // Call GET API with query as callback params
-        const queryString = new URLSearchParams(callbackParams).toString();
-        const url = `${callbackUrl}?${queryString}`;
-        console.log("callbackUrl", url);
-        const response = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json"
-          }
-        });
-        console.log("callback response", response);
-      } catch (error) {
-        console.log(
-          "Callback failed, but continuing execution:",
-          error.message
-        );
-      }
-    }
-
+   
     //line ka kya hoga baabu mosaaye
   } else if (finalStatus === "failed") {
     console.log("updating userr status", recharge);
@@ -699,8 +658,55 @@ if(lastgig !== null && lastgig !== undefined){
     }
   }
 
-    //line ka kya hoga baabu mosaaye
+
+
+
   }
+
+
+   let data = {
+      status: finalStatus,
+      message: recharge.message,
+      amount: amount,
+      number: recharge.number,
+      account: recharge.account,
+      txnId: recharge.reqid,
+      opId: recharge.opId
+    };
+
+    messageUtils.sendMessageToUser(
+      user.id,
+      `Your Recharge is ${finalStatus} for ${recharge.number}`,
+      "number"
+    );
+
+    ///call to callback url
+    if (user.callback_url) {
+      try {
+        const callbackUrl = user.callback_url;
+        const callbackParams = {
+          ...data
+        };
+        console.log("callbackParams", callbackParams);
+        // Call GET API with query as callback params
+        const queryString = new URLSearchParams(callbackParams).toString();
+        const url = `${callbackUrl}?${queryString}`;
+        console.log("callbackUrl", url);
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        console.log("callback response", response);
+      } catch (error) {
+        console.log(
+          "Callback failed, but continuing execution:",
+          error.message
+        );
+      }
+    }
+
 
   console.log(finalStatus);
 

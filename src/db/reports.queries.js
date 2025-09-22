@@ -163,6 +163,8 @@ async function getPurchasesReports(userId, options) {
     transactionType
   } = options;
 
+
+  
   const offset = (page - 1) * limit;
   let query = `
     SELECT
@@ -205,7 +207,7 @@ async function getPurchasesReports(userId, options) {
     params.push(transactionType);
   }
 
-  // Save where clause for count
+  // Save where clause for count and statistics
   const whereClause = query.split("WHERE")[1];
 
   // Add pagination to the main query
@@ -219,9 +221,43 @@ async function getPurchasesReports(userId, options) {
     WHERE ${whereClause}
   `;
 
+  // Build statistics query
+  const statsQuery = `
+    SELECT 
+      bt.status,
+      COUNT(*) as count,
+      SUM(bt.amount) as total_amount
+    FROM bal_transactions as bt
+    WHERE ${whereClause}
+    GROUP BY bt.status
+  `;
+
   // Execute queries
   const [rows] = await db.query(query, params);
   const [countResult] = await db.query(countQuery, params.slice(0, -2));
+  const [statsResult] = await db.query(statsQuery, params.slice(0, -2));
+
+  // Process statistics
+  const statistics = {
+    success: { count: 0, amount: 0 },
+    failed: { count: 0, amount: 0 },
+    pending: { count: 0, amount: 0 },
+    total: { count: 0, amount: 0 }
+  };
+
+  statsResult.forEach(row => {
+    const status = row.status.toLowerCase();
+    const count = parseInt(row.count);
+    const amount = parseFloat(row.total_amount);
+    
+    if (statistics[status]) {
+      statistics[status].count = count;
+      statistics[status].amount = amount;
+    }
+    
+    statistics.total.count += count;
+    statistics.total.amount += amount;
+  });
 
   return {
     transactions: rows,
@@ -230,10 +266,10 @@ async function getPurchasesReports(userId, options) {
       limit,
       total: countResult[0].total,
       totalPages: Math.ceil(countResult[0].total / limit)
-    }
+    },
+    statistics
   };
 }
-
 async function getPurchasesReportsOnline  ({
   page = 1,
   limit = 20,
@@ -242,12 +278,12 @@ async function getPurchasesReportsOnline  ({
   minAmount,
   maxAmount,
   status,
-  userId
+  userId,
+  mobileNumber
 }) {
-  console.log("userId is ", userId);
+  console.log("getPurchasesReportsOnline - userId:", userId, "mobileNumber:", mobileNumber);
+  
   try {
-    // This query starts with the transactions table and left joins bal_transactions
-    // This way we get all transactions even if they don't have a corresponding bal_transaction
     let query = `
       SELECT 
         t.id as transaction_id,
@@ -277,7 +313,13 @@ async function getPurchasesReportsOnline  ({
 
     const queryParams = [];
 
-    // Add filters conditionally
+    // Add user filter only if userId is provided (null = show all users)
+    if (userId) {
+      query += " AND t.user_id = ?";
+      queryParams.push(userId);
+    }
+    // If userId is null/undefined, we show transactions for ALL users
+
     if (startDate) {
       query += " AND t.created_at >= ?";
       queryParams.push(startDate);
@@ -303,77 +345,210 @@ async function getPurchasesReportsOnline  ({
       queryParams.push(maxAmount);
     }
 
-    // Add ordering
     query += " ORDER BY t.created_at DESC";
 
-    // Count total results for pagination
-    const countQuery = query.replace(
-      "SELECT \n        t.id as transaction_id,\n        t.amount,\n        t.status,\n        t.order_id,\n        t.reference_id,\n        t.payment_mode,\n        t.payment_details,\n        t.gateway_response,\n        t.created_at,\n        t.updated_at,\n        u.id as user_id,\n        u.person as name,\n        u.mobile as phonenumber,\n        u.company as shop,\n        bt.id as bal_transaction_id,\n        bt.transaction_type,\n        bt.prev_balance,\n        bt.new_balance",
-      "SELECT COUNT(*) as total"
-    );
+    // Build count query separately to avoid string replacement issues
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM transactions t
+      INNER JOIN users u ON t.user_id = u.id
+      LEFT JOIN bal_transactions bt ON t.order_id = bt.reference_id AND bt.transaction_type = 'online'
+      WHERE 1=1
+    `;
 
-    // Execute count query
-    const [countResult] = await db.query(countQuery, queryParams);
-    console.log("Count result:", countResult);
-    const totalItems = countResult[0].total;
+    // Build count query parameters (same as main query but without ORDER BY, LIMIT, OFFSET)
+    const countParams = [];
 
-    // Add pagination
+    // Add user filter only if userId is provided (null = show all users)
+    if (userId) {
+      countQuery += " AND t.user_id = ?";
+      countParams.push(userId);
+    }
+
+    if (startDate) {
+      countQuery += " AND t.created_at >= ?";
+      countParams.push(startDate);
+    }
+
+    if (endDate) {
+      countQuery += " AND t.created_at <= ?";
+      countParams.push(endDate);
+    }
+
+    if (status) {
+      countQuery += " AND t.status = ?";
+      countParams.push(status);
+    }
+
+    if (minAmount !== undefined) {
+      countQuery += " AND t.amount >= ?";
+      countParams.push(minAmount);
+    }
+
+    if (maxAmount !== undefined) {
+      countQuery += " AND t.amount <= ?";
+      countParams.push(maxAmount);
+    }
+
+    const [countResult] = await db.query(countQuery, countParams);
+    const totalItems = countResult.length > 0 ? countResult[0].total : 0;
+
     query += " LIMIT ? OFFSET ?";
     queryParams.push(parseInt(limit));
     queryParams.push((parseInt(page) - 1) * parseInt(limit));
 
-    // Execute main query
+
+    
     const [results] = await db.query(query, queryParams);
 
-    console.log("main query results", results);
-
-    if(results.length === 0) {
-      return []
+    if (!results || results.length === 0) {
+      return {
+        transactions: [],
+        pagination: {
+          total: 0,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: 1
+        },
+        statistics: {
+          success: { count: 0, amount: 0 },
+          failed: { count: 0, amount: 0 },
+          pending: { count: 0, amount: 0 },
+          total: { count: 0, amount: 0 }
+        }
+      };
     }
 
-    // Process results to format them properly
-    const formattedResults = results.map(item => {
-      return {
-        id: item.transaction_id,
-        amount: item.amount,
-        status: item.status,
-        reference_id: item.reference_id || item.order_id,
-        order_id: item.order_id,
-        gateway: item.gateway,
-        payment_mode: item.payment_mode,
-        payment_details: item.payment_details,
-        gateway_response: item.gateway_response,
-        created_at: item.created_at,
-        updated_at: item.updated_at,
-        user: {
-          id: item.user_id,
-          name: item.name,
-          phonenumber: item.phonenumber,
-          shop: item.shop
-        },
-        balance: {
-          previous: item.prev_balance,
-          new: item.new_balance,
-          transaction_type: item.transaction_type
-        } 
-      };
-    });
+    const formattedResults = results.map(item => ({
+      id: item.transaction_id,
+      amount: item.amount,
+      status: item.status,
+      reference_id: item.reference_id || item.order_id,
+      order_id: item.order_id,
+      gateway: item.gateway,
+      payment_mode: item.payment_mode,
+      payment_details: item.payment_details,
+      gateway_response: item.gateway_response,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+      user: {
+        id: item.user_id,
+        name: item.name,
+        phonenumber: item.phonenumber,
+        shop: item.shop
+      },
+      balance: {
+        previous: item.prev_balance,
+        new: item.new_balance,
+        transaction_type: item.transaction_type
+      } 
+    }));
 
-    console.log("Formatted results:", formattedResults);
-    const data={
+    // Build statistics query separately to avoid SQL syntax issues
+    let statsQuery = `
+      SELECT 
+        t.status, 
+        COUNT(*) as count, 
+        SUM(t.amount) as total_amount
+      FROM transactions t
+      INNER JOIN users u ON t.user_id = u.id
+      LEFT JOIN bal_transactions bt ON t.order_id = bt.reference_id AND bt.transaction_type = 'online'
+      WHERE 1=1
+    `;
+
+    // Build stats query parameters (same as main query but without LIMIT and OFFSET)
+    const statsParams = [];
+
+    // Add user filter only if userId is provided (null = show all users)
+    if (userId) {
+      statsQuery += " AND t.user_id = ?";
+      statsParams.push(userId);
+    }
+    // If userId is null/undefined, we show statistics for ALL users
+
+    if (startDate) {
+      statsQuery += " AND t.created_at >= ?";
+      statsParams.push(startDate);
+    }
+
+    if (endDate) {
+      statsQuery += " AND t.created_at <= ?";
+      statsParams.push(endDate);
+    }
+
+    if (status) {
+      statsQuery += " AND t.status = ?";
+      statsParams.push(status);
+    }
+
+    if (minAmount !== undefined) {
+      statsQuery += " AND t.amount >= ?";
+      statsParams.push(minAmount);
+    }
+
+    if (maxAmount !== undefined) {
+      statsQuery += " AND t.amount <= ?";
+      statsParams.push(maxAmount);
+    }
+
+    statsQuery += " GROUP BY t.status";
+    
+
+    
+    const [statsResult] = await db.query(statsQuery, statsParams);
+
+    // Process statistics
+    const statistics = {
+      success: { count: 0, amount: 0 },
+      failed: { count: 0, amount: 0 },
+      pending: { count: 0, amount: 0 },
+      total: { count: 0, amount: 0 }
+    };
+
+    if (statsResult && statsResult.length > 0) {
+      statsResult.forEach(row => {
+        const status = row.status.toLowerCase();
+        const count = parseInt(row.count);
+        const amount = parseFloat(row.total_amount);
+        
+        if (statistics[status]) {
+          statistics[status].count = count;
+          statistics[status].amount = amount;
+        }
+        
+        statistics.total.count += count;
+        statistics.total.amount += amount;
+      });
+    }
+
+    return {
       transactions: formattedResults,
       pagination: {
         total: totalItems || 0,
         page: parseInt(page),
         limit: parseInt(limit),
-        pages: Math.ceil(totalItems / parseInt(limit)) || 1
-      }
+        totalPages: Math.ceil(totalItems / parseInt(limit)) || 1
+      },
+      statistics
     };
-
-    return  data;
   } catch (error) {
     console.error("Error in getPurchasesReportsOnline:", error);
-    throw new Error("Failed to fetch online purchase reports");
+    return {
+      transactions: [],
+      pagination: {
+        total: 0,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: 1
+      },
+      statistics: {
+        success: { count: 0, amount: 0 },
+        failed: { count: 0, amount: 0 },
+        pending: { count: 0, amount: 0 },
+        total: { count: 0, amount: 0 }
+      },
+      error: "Failed to fetch online purchase reports"
+    };
   }
 };
 // async function getPurchasesReportsOnline(options) {

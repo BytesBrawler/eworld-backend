@@ -148,21 +148,19 @@ const getPurchasesOnline = asyncHandler(async (req, res) => {
 
 
 
-  let userId = req.user.id;
+  let targetUserId = null; // Default to null (show all users)
 
-
-let user;
-if(mobileNumber){
-  user = await query.users({ mobile: mobileNumber });
-  if (!user) throw new ApiError(404, "User not found");
-}
-
-  // if(id){
-  //   console.log("id -- ",id);
-  //   const user = await query.users({ id: id });
-  //   if (!user) throw new ApiError(404, "User not found");
-  //   userId = user.id;
-  // }
+  // If mobileNumber is provided, find that specific user
+  if (mobileNumber && mobileNumber.trim()) {
+    const user = await query.users({ mobile: mobileNumber.trim() });
+    if (!user) {
+      throw new ApiError(404, "User not found with mobile number: " + mobileNumber);
+    }
+    targetUserId = user.id;
+    console.log(`Filtering for specific user: ${user.person} (${mobileNumber})`);
+  } else {
+    console.log(`Showing transactions for ALL users (no user filter)`);
+  }
 
   const options = {
     page: parseInt(page),
@@ -172,8 +170,8 @@ if(mobileNumber){
     minAmount: minAmount ? parseFloat(minAmount) : undefined,
     maxAmount: maxAmount ? parseFloat(maxAmount) : undefined,
     status,
-    transactionType: 'offline',
-    userId: mobileNumber ? user.id : undefined
+    userId: targetUserId, // null = show all users, specific ID = show only that user
+    mobileNumber: mobileNumber && mobileNumber.trim() ? mobileNumber.trim() : undefined
   };
   console.log(options);
 

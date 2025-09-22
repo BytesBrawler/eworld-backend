@@ -7,8 +7,6 @@ const verifyReseller = require("../middlewares/reseller.middleware.js");
 const router = Router();
 
 
-
-
 router.route("/getApiData").get(verifyAuth, controller.getApiData);
 router.route("/generateNewApiKey").get(verifyAuth, controller.generateNewApiKey);
 router.route("/addIp").post(verifyAuth, controller.addIp);

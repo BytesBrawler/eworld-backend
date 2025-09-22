@@ -407,7 +407,11 @@
                         <span class="endpoint-method">GET</span>
                         <span class="endpoint-url">/recharge</span>
                     </div>
-                    <p>This endpoint is used to initiate a recharge for a mobile number or other service.</p>
+                    <p>This endpoint is used to initiate a recharge for mobile numbers, DTH services, data cards, and other prepaid services. The endpoint requires authentication via API key and supports various operators.</p>
+
+                    <div class="note">
+                        <i class="fas fa-shield-alt"></i> Ensure your API key is valid and has sufficient balance.
+                    </div>
 
                     <h4>Request Parameters</h4>
                     <table>
@@ -424,32 +428,39 @@
                                 <td>key</td>
                                 <td>string</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Your API key</td>
+                                <td>Your unique API key for authentication</td>
                             </tr>
                             <tr>
                                 <td>opcode</td>
                                 <td>string</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Operator code for the service provider</td>
+                                <td>Operator code (e.g., AIRTEL, JIO, VI, BSNL)</td>
                             </tr>
                             <tr>
                                 <td>number</td>
                                 <td>string</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Mobile number or service number</td>
+                                <td>10-digit mobile number or service number</td>
                             </tr>
                             <tr>
                                 <td>amount</td>
                                 <td>decimal</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Recharge amount</td>
+                                <td>Recharge amount (minimum: ₹10, maximum: ₹5000)</td>
                             </tr>
                             <tr>
                                 <td>account</td>
                                 <td>string</td>
                                 <td><span class="badge badge-optional">Optional</span></td>
-                                <td>Account number (if different from number)</td>
+                                <td>Account number for DTH/Datacard (if different from number)</td>
                             </tr>
+                            <tr>
+                                <td>resellerId</td>
+                                <td>string</td>
+                                <td><span class="badge badge-optional">Optional</span></td>
+                                <td>Reseller id, will be used in future for status check</td>
+                            </tr>
+                          
                         </tbody>
                     </table>
 
@@ -458,6 +469,54 @@
                         GET /api/v1/mtc/recharge?key=YOUR_API_KEY&opcode=AIRTEL&number=9876543210&amount=100 HTTP/1.1<br>
                         Host: www.moderntechcreations.com
                     </div>
+
+                    <h4>Response Fields</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Field</th>
+                                <th>Type</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>status</td>
+                                <td>string</td>
+                                <td>Transaction status: "success", "pending", or "failed"</td>
+                            </tr>
+                            <tr>
+                                <td>message</td>
+                                <td>string</td>
+                                <td>Descriptive message about the transaction</td>
+                            </tr>
+                            <tr>
+                                <td>amount</td>
+                                <td>decimal</td>
+                                <td>Recharge amount processed</td>
+                            </tr>
+                            <tr>
+                                <td>number</td>
+                                <td>string</td>
+                                <td>Mobile number or service number</td>
+                            </tr>
+                            <tr>
+                                <td>account</td>
+                                <td>string</td>
+                                <td>Account number (same as number if not specified)</td>
+                            </tr>
+                            <tr>
+                                <td>txnId</td>
+                                <td>string</td>
+                                <td>Unique transaction ID for tracking</td>
+                            </tr>
+                            <tr>
+                                <td>opId</td>
+                                <td>string</td>
+                                <td>Operator's transaction reference ID (null for pending/failed)</td>
+                            </tr>
+                        </tbody>
+                    </table>
 
                     <div class="response-example">
                         <h4>Success Response (200 OK)</h4>
@@ -468,7 +527,8 @@
                             &nbsp;&nbsp;"amount": 100,<br>
                             &nbsp;&nbsp;"number": "9876543210",<br>
                             &nbsp;&nbsp;"account": "9876543210",<br>
-                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000"<br>
+                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000",<br>
+                            &nbsp;&nbsp;"opId": "OP123456789"<br>
                             }
                         </div>
 
@@ -480,7 +540,8 @@
                             &nbsp;&nbsp;"amount": 100,<br>
                             &nbsp;&nbsp;"number": "9876543210",<br>
                             &nbsp;&nbsp;"account": "9876543210",<br>
-                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000"<br>
+                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000",<br>
+                            &nbsp;&nbsp;"opId": null<br>
                             }
                         </div>
 
@@ -504,7 +565,11 @@
                         <span class="endpoint-method">GET</span>
                         <span class="endpoint-url">/checkBalance</span>
                     </div>
-                    <p>This endpoint allows you to check your current account balance.</p>
+                    <p>This endpoint allows you to check your current account balance in real-time. Use this to verify available funds before initiating recharge transactions.</p>
+
+                    <div class="note">
+                        <i class="fas fa-shield-alt"></i> This endpoint requires authentication using the <code>verifyReseller</code> middleware. Only authenticated users can access balance information.
+                    </div>
 
                     <h4>Request Parameters</h4>
                     <table>
@@ -521,7 +586,7 @@
                                 <td>key</td>
                                 <td>string</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Your API key</td>
+                                <td>Your unique API key for authentication</td>
                             </tr>
                         </tbody>
                     </table>
@@ -536,17 +601,32 @@
                         <h4>Success Response (200 OK)</h4>
                         <div class="code-block">
                             {<br>
-                            &nbsp;&nbsp;"balance": 5000.75<br>
+                            &nbsp;&nbsp;"status": "success",<br>
+                            &nbsp;&nbsp;"balance": 5000.75,<br>
+                            &nbsp;&nbsp;"currency": "INR",<br>
+                            &nbsp;&nbsp;"message": "Balance retrieved successfully"<br>
                             }
                         </div>
 
-                        <h4>Error Response (400 Bad Request)</h4>
+                        <h4>Error Response (401 Unauthorized)</h4>
+                        <div class="code-block">
+                            {<br>
+                            &nbsp;&nbsp;"status": "failed",<br>
+                            &nbsp;&nbsp;"message": "Invalid API key"<br>
+                            }
+                        </div>
+
+                        <h4>Error Response (404 Not Found)</h4>
                         <div class="code-block">
                             {<br>
                             &nbsp;&nbsp;"status": "failed",<br>
                             &nbsp;&nbsp;"message": "User not found"<br>
                             }
                         </div>
+                    </div>
+
+                    <div class="note">
+                        <i class="fas fa-lightbulb"></i> Balance is returned in Indian Rupees (INR). Check balance regularly to avoid transaction failures due to insufficient funds.
                     </div>
                 </div>
 
@@ -556,7 +636,11 @@
                         <span class="endpoint-method">GET</span>
                         <span class="endpoint-url">/statuscheck</span>
                     </div>
-                    <p>This endpoint allows you to check the status of a recharge transaction.</p>
+                    <p>This endpoint allows you to check the current status of a recharge transaction. Use this for transactions that are initially in "pending" state or to verify the final status of any transaction.</p>
+
+                    <div class="note">
+                        <i class="fas fa-shield-alt"></i> This endpoint requires authentication using the <code>verifyReseller</code> middleware. You can only check status of your own transactions.
+                    </div>
 
                     <h4>Request Parameters</h4>
                     <table>
@@ -573,13 +657,13 @@
                                 <td>key</td>
                                 <td>string</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Your API key</td>
+                                <td>Your unique API key for authentication</td>
                             </tr>
                             <tr>
                                 <td>txnid</td>
                                 <td>string</td>
                                 <td><span class="badge badge-required">Required</span></td>
-                                <td>Transaction ID received from the recharge endpoint</td>
+                                <td>Reseller id sent in recharge endpoints request</td>
                             </tr>
                         </tbody>
                     </table>
@@ -590,6 +674,54 @@
                         Host: www.moderntechcreations.com
                     </div>
 
+                    <h4>Response Fields</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Field</th>
+                                <th>Type</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>status</td>
+                                <td>string</td>
+                                <td>Current transaction status: "success", "pending", or "failed"</td>
+                            </tr>
+                            <tr>
+                                <td>message</td>
+                                <td>string</td>
+                                <td>Descriptive message about the transaction status</td>
+                            </tr>
+                            <tr>
+                                <td>amount</td>
+                                <td>decimal</td>
+                                <td>Original recharge amount</td>
+                            </tr>
+                            <tr>
+                                <td>number</td>
+                                <td>string</td>
+                                <td>Mobile number or service number</td>
+                            </tr>
+                            <tr>
+                                <td>account</td>
+                                <td>string</td>
+                                <td>Account number used for recharge</td>
+                            </tr>
+                            <tr>
+                                <td>txnId</td>
+                                <td>string</td>
+                                <td>Your transaction ID used for tracking</td>
+                            </tr>
+                            <tr>
+                                <td>opId</td>
+                                <td>string</td>
+                                <td>Operator's transaction reference ID (null if not available)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
                     <div class="response-example">
                         <h4>Success Response (200 OK)</h4>
                         <div class="code-block">
@@ -599,7 +731,41 @@
                             &nbsp;&nbsp;"amount": 100,<br>
                             &nbsp;&nbsp;"number": "9876543210",<br>
                             &nbsp;&nbsp;"account": "9876543210",<br>
-                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000"<br>
+                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000",<br>
+                            &nbsp;&nbsp;"opId": "OP123456789"<br>
+                            }
+                        </div>
+
+                        <h4>Pending Response (200 OK)</h4>
+                        <div class="code-block">
+                            {<br>
+                            &nbsp;&nbsp;"status": "pending",<br>
+                            &nbsp;&nbsp;"message": "Transaction is being processed",<br>
+                            &nbsp;&nbsp;"amount": 100,<br>
+                            &nbsp;&nbsp;"number": "9876543210",<br>
+                            &nbsp;&nbsp;"account": "9876543210",<br>
+                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000",<br>
+                            &nbsp;&nbsp;"opId": null<br>
+                            }
+                        </div>
+
+                        <h4>Failed Response (200 OK)</h4>
+                        <div class="code-block">
+                            {<br>
+                            &nbsp;&nbsp;"status": "failed",<br>
+                            &nbsp;&nbsp;"message": "Recharge failed - Invalid mobile number",<br>
+                            &nbsp;&nbsp;"amount": 100,<br>
+                            &nbsp;&nbsp;"number": "9876543210",<br>
+                            &nbsp;&nbsp;"account": "9876543210",<br>
+                            &nbsp;&nbsp;"txnId": "TXN-123-456-1620000000000",<br>
+                            &nbsp;&nbsp;"opId": null<br>
+                            }
+                        </div>
+                        <h4>Failed Response (200 OK)</h4>
+                        <div class="code-block">
+                            {<br>
+                            &nbsp;&nbsp;"status": "false",<br>
+                            &nbsp;&nbsp;"message": "Recharge not found",<br>
                             }
                         </div>
 
@@ -607,12 +773,29 @@
                         <div class="code-block">
                             {<br>
                             &nbsp;&nbsp;"status": "failed",<br>
-                            &nbsp;&nbsp;"message": "Recharge not found"<br>
+                            &nbsp;&nbsp;"message": "Transaction not found"<br>
+                            }
+                        </div>
+
+                        <h4>Error Response (401 Unauthorized)</h4>
+                        <div class="code-block">
+                            {<br>
+                            &nbsp;&nbsp;"status": "failed",<br>
+                            &nbsp;&nbsp;"message": "Invalid API key"<br>
                             }
                         </div>
                     </div>
+
+                    <div class="note">
+                        <i class="fas fa-clock"></i> <strong>Status Values:</strong><br>
+                        • <code>success</code> - Transaction completed successfully<br>
+                        • <code>pending</code> - Transaction is being processed<br>
+                        • <code>failed</code> - Transaction failed or was rejected<br><br>
+                        <i class="fas fa-lightbulb"></i> For pending transactions, wait 2-3 minutes before checking again. Most transactions complete within 5 minutes.
+                    </div>
                 </div>
-            </section>
+
+          
 
             <section id="callbacks" class="section">
                 <h2>Callbacks</h2>

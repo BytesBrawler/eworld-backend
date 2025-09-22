@@ -3,11 +3,24 @@ const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/apiError");
 const query = require("../db/retailer.queries");
 const { parseApiResponse } = require("../utils/response_parser");
-const db = require("../db");
+const db = require("../db"); // Use original database
 const { dynamicRechargeCall } = require("./dynamicrecharge");
+const { 
+  createModuleLogger, 
+  logRequest, 
+  logError, 
+  logApiCall,
+  logApiCallDetailed,
+  logBusinessOperation,
+  logFinancialOperation,
+  logRechargeStep
+} = require("../utils/logger");
 
 const messageUtils = require("../utils/sendMessage");
 const e = require("express");
+
+// Create module-specific logger
+const logger = createModuleLogger('retailer-controller');
 
 const getOperators = asyncHandler(async (req, res) => {
   const typeId = req.query.type;
@@ -73,15 +86,15 @@ const getOperatorsOffer = asyncHandler(async (req, res) => {
       circleId
     ]);
 
-    console.log("temp circle", tempCircle);
+    logger.debug({ tempCircle, circleId }, "Retrieved circle information");
     // Get the name from tempCircle and fetch the corresponding value from circles[0].codes
     const tempCircleName = tempCircle[0].name;
     circle = circles[0].codes[tempCircleName];
-    console.log("circle", circle);
+    logger.debug({ circle, tempCircleName }, "Mapped circle code");
   }
 
-  console.log("plan fetch line", planFetchLine);
-  console.log("circle", circles);
+  logger.debug({ planFetchLine, keywordId }, "Plan fetch line configuration");
+  logger.debug({ circles }, "Available circles");
 
   const response = await dynamicRechargeCall(
     planFetchLine[0].api_provider,
@@ -145,7 +158,7 @@ const getOperatorsOffer = asyncHandler(async (req, res) => {
   );
   data = transformedPlans;
 
-  console.log("transformed data", data);
+  logger.debug({ transformedPlansCount: data?.length || 0 }, "Plan data transformation completed");
 
   return res
     .status(200)
@@ -227,7 +240,23 @@ const recharge = asyncHandler(async (req, res) => {
   let { keywordId, customerNumber, amount, id, account, providerID } = req.body;
   // if (!keywordId) throw new ApiError(400, "Keyword is required");
 
-  console.log("req.body", req.body);
+  // Log recharge initiation
+  logBusinessOperation('RECHARGE_INITIATED', {
+    keywordId, 
+    customerNumber: customerNumber?.substring(0, 4) + '****', // Mask sensitive data
+    amount, 
+    id, 
+    providerID,
+    account: account?.substring(0, 4) + '****'
+  }, req.user?.id);
+
+  logRechargeStep('VALIDATION_START', {
+    id: id || 'new',
+    userId: req.user?.id,
+    keywordId,
+    amount,
+    customerNumber
+  });
 
 
 
@@ -239,17 +268,31 @@ const recharge = asyncHandler(async (req, res) => {
     ]);
   }
 
-  console.log("old recharge", oldRecharge);
+  logger.debug({ oldRechargeId: oldRecharge?.id, hasOldRecharge: !!oldRecharge }, "Previous recharge check");
 
   let userId = req.user.id;
   const balance1 = req.user.balance;
 
-
   let balance = parseFloat(balance1); // or Number(user.balance)
   amount = parseFloat(req.body.amount); // or Number(req.body.amount)
 
+  // Log balance check
+  logFinancialOperation('BALANCE_CHECK', userId, 0, balance, balance);
+  logger.info({
+    userId,
+    currentBalance: balance,
+    requestedAmount: amount,
+    hasSufficientFunds: balance >= amount
+  }, '💰 Balance validation');
+
   if (!id) {
     if (balance < amount) {
+      logger.error({
+        userId,
+        currentBalance: balance,
+        requestedAmount: amount,
+        shortfall: amount - balance
+      }, '❌ Insufficient balance for recharge');
       throw new ApiError(400, "Insufficient balance");
     }
   } else {
@@ -274,7 +317,7 @@ const recharge = asyncHandler(async (req, res) => {
   //match keyword data
 
   const keywordDetails = keywordRows[0];
-  console.log(keywordDetails);
+  logger.debug({ keywordId, operatorCode: keywordDetails.code }, "Keyword details retrieved");
 
   if (!account) {
     account = customerNumber;
@@ -310,9 +353,22 @@ const recharge = asyncHandler(async (req, res) => {
       ]
     );
 
-    console.log("old recharged", oldRecharged);
+    logger.debug({ 
+      duplicateCount: oldRecharged.length,
+      timeWindowSeconds: seconds,
+      userId,
+      keywordId
+    }, "Duplicate recharge check completed");
 
     if (oldRecharged.length > 0) {
+      logger.warn({
+        userId,
+        keywordId,
+        amount,
+        account: account?.substring(0, 4) + '****',
+        duplicateRechargeId: oldRecharged[0].id,
+        timeDifference: seconds
+      }, '⚠️ DUPLICATE RECHARGE DETECTED');
       // Compare using timestamps to avoid string/date mismatch
       const createdAt = new Date(oldRecharged[0].created_at).getTime();
       const now = Date.now();
@@ -352,7 +408,12 @@ const recharge = asyncHandler(async (req, res) => {
     `,
       [keywordId, providerID, amount, amount, account.length, account.length]
     );
-    console.log("lines with provider", lines);
+    logger.debug({ 
+      providerID, 
+      linesFound: lines.length,
+      keywordId,
+      amount 
+    }, "API provider lines retrieved");
   } else {
     [lines] = await db.query(
       `
@@ -398,7 +459,12 @@ const recharge = asyncHandler(async (req, res) => {
     }
   }
 
-  console.log("lines without prevalues", lines);
+  logger.debug({ 
+    linesFoundCount: lines.length,
+    hasProvider: !!providerID,
+    amount,
+    keywordId 
+  }, "Keyword lines retrieved without pre-values");
 
   const params = {
     mobile: customerNumber,
@@ -409,14 +475,31 @@ const recharge = asyncHandler(async (req, res) => {
     remark: "Mobile Recharge"
   };
 
-
-  console.log("lines are", lines);
+  logger.debug({ 
+    totalLines: lines.length,
+    rechargeParams: {
+      ...params,
+      mobile: params.mobile.substring(0, 4) + '****' // Mask sensitive data
+    }
+  }, "Processing recharge with available lines");
 
   if (!id) {
+    // Log balance deduction
+    const balanceAfter = balance - amount;
+    logFinancialOperation('BALANCE_DEDUCTION', userId, amount, balance, balanceAfter);
+    
     const [updateBalance] = await db.query(
       `UPDATE users SET balance = balance - ? WHERE id = ?`,
       [amount, userId]
     );
+
+    logger.info({
+      userId,
+      deductedAmount: amount,
+      previousBalance: balance,
+      newBalance: balanceAfter,
+      rowsAffected: updateBalance.affectedRows
+    }, '💰 Balance deducted for recharge');
     if (updateBalance.affectedRows === 0) {
       throw new ApiError(404, "TRY AGAIN");
     }
@@ -475,7 +558,12 @@ const recharge = asyncHandler(async (req, res) => {
   //get Api and keyword detail according to top match keyword_line
 
   const currentline = lines[0];
-  console.log("current line", currentline);
+  logger.debug({ 
+    lineId: currentline.id,
+    apiProvider: currentline.api_provider,
+    priority: currentline.priority,
+    balance: currentline.balance
+  }, "Selected API line for recharge");
   let statusCheckApi = null;
   let RechargeApi;
   let balanceApi = null;
@@ -547,8 +635,12 @@ const recharge = asyncHandler(async (req, res) => {
 
   while (attempt < maxAttempts) {
     finalStatus = "pending";
-    console.log(lines.length);
-    console.log("byValue", byValue);
+    logger.debug({ 
+      attempt, 
+      maxAttempts, 
+      availableLines: lines.length, 
+      byValue 
+    }, "Recharge attempt loop iteration");
 
     if (lines.length === 0 && byValue && !id) {
       const [liness] = await db.query(
@@ -630,10 +722,34 @@ const recharge = asyncHandler(async (req, res) => {
       continue;
     }
 
+    // Log API call attempt
+    const apiCallStart = Date.now();
+    logRechargeStep('API_CALL_START', {
+      id: reqId,
+      userId,
+      keywordId,
+      amount,
+      customerNumber
+    }, {
+      attempt,
+      provider: currentline.api_provider,
+      apiEndpoint: currentline.recharge_api
+    });
+
     let rechargeResponse = await dynamicRechargeCall(
       currentline.api_provider,
       currentline.recharge_api,
       attemptParams
+    );
+
+    const apiCallDuration = Date.now() - apiCallStart;
+    logApiCallDetailed(
+      currentline.api_provider,
+      currentline.recharge_api,
+      attemptParams,
+      rechargeResponse,
+      apiCallDuration,
+      rechargeResponse?.status === "error" ? new Error("API call failed") : null
     );
 
     if (rechargeResponse.status === "error" || rechargeResponse === undefined || rechargeResponse === null) {
@@ -848,7 +964,12 @@ const recharge = asyncHandler(async (req, res) => {
     attempt++;
   }
 
-  console.log("ended loop", attempt, lines.length);
+  logger.info({ 
+    totalAttempts: attempt, 
+    availableLines: lines.length, 
+    finalStatus,
+    reqId 
+  }, "Recharge attempt loop completed");
   const message = finalMessage
     ? finalMessage
     : `Recharge is ${finalStatus} for ${customerNumber}`;
@@ -1135,7 +1256,7 @@ async function calculateUserMargins({ userId, parentId, keywordId, amount }) {
             END
         END
       ) AS margin,
-        COALESCE(ks.additional_charges, k.additional_charges) AS additional_charges,
+      COALESCE(ks.additional_charges, k.additional_charges) AS additional_charges,
       COALESCE(ks.is_charges_fixed, true) AS is_charges_fixed
     FROM keywords AS k
     LEFT JOIN users u ON u.id = ?
@@ -1192,6 +1313,11 @@ async function calculateUserMargins({ userId, parentId, keywordId, amount }) {
     parentAdd = parseFloat(parentMargin.margin) - retailerAdd;
   }
 
+
+  if(parentMargin.margin_type === "flat") {
+      parentAdd = 0;
+    }
+
   // Super margin calculation
   if (parentMargin.role == 4) {
     if (parentMargin.margin_type === "flat") {
@@ -1199,6 +1325,10 @@ async function calculateUserMargins({ userId, parentId, keywordId, amount }) {
     } else {
       superAdd =
         parseFloat(superMargin.margin) - parseFloat(parentMargin.margin);
+    }
+
+    if(superMargin.margin_type === "flat") {
+      superAdd = 0;
     }
   }
 
